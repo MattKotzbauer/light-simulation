@@ -1,5 +1,5 @@
 
-[WIP]: Isometric Navier-Stokes Based Rain Simulation
+***[WIP]: Isometric Navier-Stokes Based Rain Simulation***
 
 Steps: 
 1. Direct (top-down) water simulation
