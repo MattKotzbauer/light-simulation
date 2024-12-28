@@ -7,7 +7,18 @@
 #include <math.h>
 #include <stdio.h>
 
-// TODO: clean up imported libraries that only have 1-2 functions
+/*
+Large-scale TODO's:
+* HSV conversion (have colors correspond to varying values of dark blue as start)
+* change SimulationGrid to be set of contiguous arrays
+* change SimulationDriver() call to have pointer to simulation grid as parameter, then also pass into SimulationRender(), then we can remove globals
+* (control saturation through pixel guy)
+
+
+(* clean up imported libraries)
+  
+ */
+
 
 #define internal static 
 #define local_persist static
@@ -43,9 +54,32 @@ struct win32_offscreen_buffer
   int BytesPerPixel;
 };
 
+struct NS_Pixel{
+  real32 Density;
+  real32 VelocityX;
+  real32 VelocityY;
 
-// TODO: this is a global for now
+  real32 PriorDensity;
+  real32 PriorVelocityX;
+  real32 PriorVelocityY;
+
+  real32 SourceValue;
+};
+
+global_variable real32 GlobalDiffusionRate = 5;
+global_variable uint8 GlobalBaseDeltaTime = 1;
+
+// TODO: make these configurable
+const int32 GlobalHeight = 720;
+const int32 GlobalWidth = 1280;
+
+// TODO: (when using, bound queries to be within the GlobalWidth, GlobalHeight bounds)
+#define IX(i,j) (i+(GlobalWidth+2)*j)
+
 global_variable bool GlobalRunning;
+// TODO: convert into pair of single-dimensional arrays for density and velocity
+// TODO: support down-scaled version that treats multiple render pixels as single simulation pixel
+global_variable NS_Pixel SimulationGrid[GlobalHeight + 2][GlobalWidth + 2];
 global_variable win32_offscreen_buffer GlobalBackBuffer;
 
 // globals for sound loading
@@ -194,13 +228,70 @@ internal win32_window_dimension GetWindowDimension(HWND Window){
   return Result;
 }
 
-/* Render animated pixel content into Buffer */
-internal void RenderWeirdGradient(win32_offscreen_buffer *Buffer, int BlueOffset, int GreenOffset)
-{
-  int32 XCenter = Buffer->Width / 2;
-  int32 YCenter = Buffer->Height / 2;
-  int32 SquareSize = 50;
+/* Initialize contents of SimulationGrid on first frame */
+internal void NSSimulationInit(){
+  // (we'll initialize to 0 for now)
+  for(int i = 0; i < GlobalHeight; ++i){
+    for(int j = 0; j < GlobalWidth; ++j){
+      SimulationGrid[i][j].SourceValue = 0;
+      SimulationGrid[i][j].Density = 0;
+      SimulationGrid[i][j].PriorDensity = 0;
+    }
+  }
+  // SimulationGrid[300][300].SourceValue = 3;
+  for(int i = 300; i < 400; ++i){ for(int j = 300; j < 400; ++j){ SimulationGrid[i][j].SourceValue = 10; }}
+}
+
+
+internal void SimulationDriver(){
+  // A: Simluate 
+
+  // 1: Density Simulation
+  //vreal32 AuxDensity = SimulationGrid[Y + 1][X + 1].Density;
   
+
+  // a: Source
+  for(int i = 1; i < GlobalHeight; ++i){
+    for(int j = 1; j < GlobalHeight; ++j){
+      SimulationGrid[i][j].Density += SimulationGrid[i][j].SourceValue;
+    }
+  }
+
+  
+  // b: Diffusion Rate
+  real32 DiffusionConstant = GlobalHeight * GlobalWidth * GlobalDiffusionRate * (real32)GlobalBaseDeltaTime;
+  for(int GaussSeidelIterations = 0; GaussSeidelIterations < 20; ++GaussSeidelIterations){
+    for(int i = 1; i <= GlobalHeight; ++i){
+      for(int j = 1; j <= GlobalWidth; ++j){
+	SimulationGrid[i][j].Density = SimulationGrid[i][j].PriorDensity
+	  + DiffusionConstant * (SimulationGrid[i-1][j].Density + SimulationGrid[i+1][j].Density
+				 + SimulationGrid[i][j+1].Density + SimulationGrid[i][j-1].Density
+				 )/(1+4*DiffusionConstant);
+      }
+    }
+  }
+  
+	  
+	  
+  // c: 
+	  
+  // 2: (Velocity Simulation)
+
+
+  // Other Variable Changes:
+  for(int i = 0; i < GlobalHeight; ++i){
+    for(int j = 0; j < GlobalWidth; ++j){
+      
+    }
+  }
+  // SimulationGrid[Y + 1][X + 1].PriorDensity = AuxDensity;
+	  
+}
+
+/* Render animated pixel content into Buffer */
+internal void SimulationRender(win32_offscreen_buffer *Buffer, int BlueOffset, int GreenOffset)
+{
+
   uint8 *Row = (uint8*)Buffer->Memory;
   for(int Y = 0;
       Y < Buffer->Height;
@@ -213,22 +304,14 @@ internal void RenderWeirdGradient(win32_offscreen_buffer *Buffer, int BlueOffset
 	  ++X
 	  )
 	{
-	  if(
-	     X < XCenter + SquareSize
-	     && X > XCenter - SquareSize
-	     && Y < YCenter + SquareSize
-	     && Y > YCenter - SquareSize
-	     ){
-	    *Pixel++ = 0x00FF0000;
-	  }
-	  else{
-	    // Blue: 
-	    uint8 Blue = (X + BlueOffset);
-	    // Green:
-	    uint8 Green = (Y + GreenOffset);
-	    // (Red Blank)
-	    *Pixel++ = ((Green << 8) | Blue);
-	  }
+	  real32 PixelDensity = SimulationGrid[Y + 1][X + 1].Density;
+	  // PixelDensity = 250;
+	  uint8 Blue = (PixelDensity > 255) ? 255 : (uint8)PixelDensity;
+	  // Green:
+	  // uint8 Green = (Y + GreenOffset);
+	  // (Red Blank)
+	  // *Pixel++ = ((Green << 8) | Blue);
+	  *Pixel++ = Blue;
 	}
 
       Row += Buffer->Pitch;
@@ -387,6 +470,8 @@ int WINAPI WinMain(HINSTANCE Instance,
   WNDCLASSA WindowClass = {};
 
   Win64ResizeDIBSection(&GlobalBackBuffer, 1280, 720);
+
+  NSSimulationInit();
   
   WindowClass.style = CS_HREDRAW|CS_VREDRAW;
   WindowClass.lpfnWndProc = Win64MainWindowCallback;
@@ -424,16 +509,18 @@ int WINAPI WinMain(HINSTANCE Instance,
 
 	  HDC DeviceContext = GetDC(Window);
 
-	  Win64InitWASAPI(Window);
+	  // Win64InitWASAPI(Window);
 
 	  // Sound vars
+	  /* 
 	  HRESULT hr;
 	  real32 frequencyHz = 261;
 	  real32 phase = 0.0;
 	  real32 phaseDelta = (2.0 * 3.14159265358979323846 * frequencyHz) / sampleRateGlobal;
 	  real32 volume = 1;
 	  real32 sample;
-
+	  */
+	  
 	  // LARGE_INTEGER BeginCounter;
 	  // QueryPerformanceCounter(&BeginCounter);
 
@@ -456,54 +543,13 @@ int WINAPI WinMain(HINSTANCE Instance,
 		DispatchMessage(&Message); 
 	      }
 
-	    // Process frame-perfect keyboard input
-	    if(GetAsyncKeyState('S') & (1 << 15)){ GlobalYOffset += 1; }
-	    if(GetAsyncKeyState('W') & (1 << 15)){ GlobalYOffset -= 1; }
-	    if(GetAsyncKeyState('D') & (1 << 15)){ GlobalXOffset += 1; }
-	    if(GetAsyncKeyState('A') & (1 << 15)){ GlobalXOffset -= 1; }
-	    
 	    // Render Visual Buffer
-	    RenderWeirdGradient(&GlobalBackBuffer, GlobalXOffset, GlobalYOffset);
+	    SimulationDriver();
+	    SimulationRender(&GlobalBackBuffer, GlobalXOffset, GlobalYOffset);
 
-	    /* 
-	    // SOUND LOAD START
-	    UINT32 currentPaddingFrames;
-	    hr = pAudioClientGlobal->GetCurrentPadding(&currentPaddingFrames);
-	    if(FAILED(hr)){ OutputDebugStringA("Failed to get current audio frame padding"); }
-	    UINT32 currentAvailableFrames = bufferFrameCountGlobal - currentPaddingFrames;
-	    if (currentAvailableFrames > 0){
-
-	      BYTE* pData = NULL;
-	      hr = pRenderClientGlobal->GetBuffer(currentAvailableFrames, &pData);
-	      if(FAILED(hr)){ OutputDebugStringA("Failed to get audio buffer"); }
-	      for(uint32 i = 0; i < currentAvailableFrames; ++i){
-	     
-
-		// GENERATE SAMPLE START
-		// sample = GenerateWave(volume, frequencyHz, sampleRateGlobal, phase);
-		sample = sinf(phase) * volume;
-
-		phase += phaseDelta;
-		if (phase >= 2.0 * 3.14159265358979323846){
-		  phase -= 2.0 * 3.14159265358979323846;
-		}
-		// GENERATE SAMPLE END
-
-		((float*)pData)[i*2] = sample; // Left channel
-		((float*)pData)[i*2 + 1] = sample; // Right channel
-	     
-	      }
-	      pRenderClientGlobal->ReleaseBuffer(currentAvailableFrames, 0);
-
-	    }
-	    // SOUND LOAD END
-	    */
-	 
 	    win32_window_dimension Dimension = GetWindowDimension(Window);
 	    Win64DisplayBufferInWindow(DeviceContext, Dimension.Width, Dimension.Height, &GlobalBackBuffer);
 	 
-	    //++XOffset;
-
 	    // Time Tracking (QueryPerformanceCounter, rdtsc): 
 	    int64 EndCycleCount = __rdtsc();
 	    LARGE_INTEGER EndCounter;
@@ -528,8 +574,6 @@ int WINAPI WinMain(HINSTANCE Instance,
 	    // (end of while(GlobalRunning loop)
 	  }
 
-	  hr = pAudioClientGlobal->Stop();
-	  if(FAILED(hr)){ OutputDebugStringA("stopping of audio client failed"); }
        
        
 	}

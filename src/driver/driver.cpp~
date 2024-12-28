@@ -30,6 +30,8 @@ typedef double real64;
 const IID IID_IAudioClient = __uuidof(IAudioClient);
 const IID IID_IAudioRenderClient = __uuidof(IAudioRenderClient);
 
+int32 GlobalXOffset;
+int32 GlobalYOffset;
 
 struct win32_offscreen_buffer
 {
@@ -87,27 +89,6 @@ internal void Win32LoadXInput(void){
     // TODO: diagnostic
   }
 }
-
-
-/* 
-internal float GenerateWave(double volume, double frequency, double sampleRate, double& phase){
-
-  // 1: Adjust sample
-  // float sample = (phase < 3.14159265358979323846) ? 0.5f : -0.5f; // Square Wave
-  real32 sample = sinf(phase) * volume; // Sine Wave
-  // sample *= volume; 
-
-  // 2: Advance phase
-  real64 phaseDelta = (2.0 * 3.14159265358979323846 * frequency) / sampleRate;
-  phase += phaseDelta;
-  if (phase >= 2.0 * 3.14159265358979323846){
-    phase -= 2.0 * 3.14159265358979323846;
-  }
-
-  return sample;
-  
-}
-*/
 
 internal void Win64InitWASAPI(HWND Window){
 
@@ -194,21 +175,6 @@ internal void Win64InitWASAPI(HWND Window){
 
   sampleRateGlobal = pwfx->nSamplesPerSec;
 
-
-  //while(GlobalRunning){
-
-  // globalize; pRenderClient, bufferFrameCount, 
-  
-
-
-    //}
-  
-    //if(FAILED(hr)){ return; }
-
-  
-  // https://chatgpt.com/c/674e8131-de5c-8004-8976-e2f4d4e95576
-  // https://learn.microsoft.com/en-us/windows/win32/coreaudio/rendering-a-stream
-
   
 }
 
@@ -231,6 +197,10 @@ internal win32_window_dimension GetWindowDimension(HWND Window){
 /* Render animated pixel content into Buffer */
 internal void RenderWeirdGradient(win32_offscreen_buffer *Buffer, int BlueOffset, int GreenOffset)
 {
+  int32 XCenter = Buffer->Width / 2;
+  int32 YCenter = Buffer->Height / 2;
+  int32 SquareSize = 50;
+  
   uint8 *Row = (uint8*)Buffer->Memory;
   for(int Y = 0;
       Y < Buffer->Height;
@@ -243,12 +213,22 @@ internal void RenderWeirdGradient(win32_offscreen_buffer *Buffer, int BlueOffset
 	  ++X
 	  )
 	{
-	  // Blue: 
-	  uint8 Blue = (X + BlueOffset);
-	  // Green:
-	  uint8 Green = (Y + GreenOffset);
-	  // (Red Blank)
-	  *Pixel++ = ((Green << 8) | Blue);
+	  if(
+	     X < XCenter + SquareSize
+	     && X > XCenter - SquareSize
+	     && Y < YCenter + SquareSize
+	     && Y > YCenter - SquareSize
+	     ){
+	    *Pixel++ = 0x00FF0000;
+	  }
+	  else{
+	    // Blue: 
+	    uint8 Blue = (X + BlueOffset);
+	    // Green:
+	    uint8 Green = (Y + GreenOffset);
+	    // (Red Blank)
+	    *Pixel++ = ((Green << 8) | Blue);
+	  }
 	}
 
       Row += Buffer->Pitch;
@@ -367,7 +347,6 @@ LRESULT Win64MainWindowCallback(
     case VK_F4: {
       if ((LParam & (1 << 29)) != 0){ GlobalRunning = false; }
     } break;
-      
     }
   } break;
 
@@ -438,8 +417,8 @@ int WINAPI WinMain(HINSTANCE Instance,
       if(Window)
 	{
 	  // (Graphics vars)
-	  int XOffset = 0;
-	  int YOffset = 0;
+	  GlobalXOffset = 0;
+	  GlobalYOffset = 0;
 
 	  GlobalRunning = true;
 
@@ -477,42 +456,16 @@ int WINAPI WinMain(HINSTANCE Instance,
 		DispatchMessage(&Message); 
 	      }
 
-	    // poll xinput
-	    for(DWORD ControllerIndex = 0; ControllerIndex < XUSER_MAX_COUNT; ControllerIndex++){
-	      XINPUT_STATE ControllerState;
-	      if (XInputGetState(ControllerIndex, &ControllerState) == ERROR_SUCCESS){
-		// Controller is connected
-		XINPUT_GAMEPAD *Pad = &ControllerState.Gamepad;
-		bool Up = (Pad->wButtons & XINPUT_GAMEPAD_DPAD_UP);
-		bool Down = (Pad->wButtons & XINPUT_GAMEPAD_DPAD_DOWN);
-		bool Left = (Pad->wButtons & XINPUT_GAMEPAD_DPAD_LEFT);
-		bool Right = (Pad->wButtons & XINPUT_GAMEPAD_DPAD_RIGHT);
-		bool Start = (Pad->wButtons & XINPUT_GAMEPAD_START);
-		bool Back = (Pad->wButtons & XINPUT_GAMEPAD_BACK);
-		bool LeftShoulder = (Pad->wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER);
-		bool RightShoulder = (Pad->wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER);
-		bool AButton = (Pad->wButtons & XINPUT_GAMEPAD_A);
-		bool BButton = (Pad->wButtons & XINPUT_GAMEPAD_B);
-		bool XButton = (Pad->wButtons & XINPUT_GAMEPAD_X);
-		bool YButton = (Pad->wButtons & XINPUT_GAMEPAD_Y);
-		//bool DPadUp = (Pad->Buttons & XINPUT_GAMEPAD_DPAD_UP);
-	     
-		int16 StickX = Pad->sThumbLX;
-		int16 StickY = Pad->sThumbLY;
+	    // Process frame-perfect keyboard input
+	    if(GetAsyncKeyState('S') & (1 << 15)){ GlobalYOffset += 1; }
+	    if(GetAsyncKeyState('W') & (1 << 15)){ GlobalYOffset -= 1; }
+	    if(GetAsyncKeyState('D') & (1 << 15)){ GlobalXOffset += 1; }
+	    if(GetAsyncKeyState('A') & (1 << 15)){ GlobalXOffset -= 1; }
+	    
+	    // Render Visual Buffer
+	    RenderWeirdGradient(&GlobalBackBuffer, GlobalXOffset, GlobalYOffset);
 
-		if(AButton){ YOffset += 2; }
-	     
-	      }
-	      else{
-		// Controller is not connected
-	      }
-	    }
-
-	    XINPUT_VIBRATION Vibration; 
-	 
-	    // (initializes visual buffer)
-	    RenderWeirdGradient(&GlobalBackBuffer, XOffset, YOffset);
-
+	    /* 
 	    // SOUND LOAD START
 	    UINT32 currentPaddingFrames;
 	    hr = pAudioClientGlobal->GetCurrentPadding(&currentPaddingFrames);
@@ -544,11 +497,12 @@ int WINAPI WinMain(HINSTANCE Instance,
 
 	    }
 	    // SOUND LOAD END
+	    */
 	 
 	    win32_window_dimension Dimension = GetWindowDimension(Window);
 	    Win64DisplayBufferInWindow(DeviceContext, Dimension.Width, Dimension.Height, &GlobalBackBuffer);
 	 
-	    ++XOffset;
+	    //++XOffset;
 
 	    // Time Tracking (QueryPerformanceCounter, rdtsc): 
 	    int64 EndCycleCount = __rdtsc();
@@ -567,7 +521,9 @@ int WINAPI WinMain(HINSTANCE Instance,
 	    char Buffer[256];
 	    sprintf(Buffer, "ms / frame: %.02fms --- FPS: %.02ffps --- m-cycles / frame: %.02f\n", MSPerFrame, FPS, MCPF);
 	    OutputDebugStringA(Buffer);
-	    
+
+	    // GlobalXOffset += 1;
+	    // GlobalYOffset -= 1;
 	    
 	    // (end of while(GlobalRunning loop)
 	  }
