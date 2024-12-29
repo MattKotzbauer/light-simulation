@@ -67,15 +67,29 @@ struct NS_Pixel{
   real32 DensitySource;
 };
 
-global_variable real32 GlobalDiffusionRate = 1.0f;
-global_variable real32 GlobalBaseDeltaTime = 20.0f;
+global_variable real32 GlobalDiffusionRate = .0001f;
+global_variable real32 GlobalBaseDeltaTime = 10.0f;
 
 // TODO: make these configurable
 const int32 GlobalHeight = 720;
 const int32 GlobalWidth = 1280;
 
+
+
 // TODO: (when using, bound queries to be within the GlobalWidth, GlobalHeight bounds)
 #define IX(i,j) (i+(GlobalWidth+2)*j)
+
+const int32 FullSize = (GlobalWidth + 2) * (GlobalHeight + 2);
+struct FutureSimulationGrid{
+  real32 Density[FullSize];
+  real32 VelocityX[FullSize];
+  real32 VelocityY[FullSize];
+  
+  real32 PriorDensity[FullSize];
+  // ...
+  
+};
+
 
 global_variable bool GlobalRunning;
 // TODO: convert into pair of single-dimensional arrays for density and velocity
@@ -278,11 +292,11 @@ internal void SimulationDriver(){
   float BackTraceX, BackTraceY, RelativeDeltaTime;
   float BW[4]; // (Bilinear Weights)
   RelativeDeltaTime = GlobalBaseDeltaTime * (real32)((GlobalHeight + GlobalWidth)/2);
-  for(int j = 1; j <= GlobalHeight; ++j){
-    for(int i = 1; i <= GlobalWidth; ++i){
+  for(int i = 1; i < GlobalHeight; ++i){
+    for(int j = 1; j < GlobalWidth; ++j){
 
-      BackTraceX = i - (SimulationGrid[i][j].VelocityX * RelativeDeltaTime);
-      BackTraceY = j - (SimulationGrid[i][j].VelocityY * RelativeDeltaTime);
+      BackTraceX = i - (SimulationGrid[j][i].VelocityX * RelativeDeltaTime);
+      BackTraceY = j - (SimulationGrid[j][i].VelocityY * RelativeDeltaTime);
 
       // (Normalize BackTraceX, BackTraceY)
       if(BackTraceX < 0.5) BackTraceX = 0.5; if (BackTraceX > GlobalHeight + 0.5) BackTraceX = GlobalHeight + 0.5;
@@ -294,7 +308,7 @@ internal void SimulationDriver(){
       BW[1] = BackTraceX - InterpolationI0; BW[0] = 1 - BW[1];
       BW[3] = BackTraceY - InterpolationJ0; BW[2] = 1 - BW[3];
 
-      SimulationGrid[i][j].Density = BW[0] * (BW[2] * SimulationGrid[InterpolationI0][InterpolationJ0].PriorDensity
+      SimulationGrid[j][i].Density = BW[0] * (BW[2] * SimulationGrid[InterpolationI0][InterpolationJ0].PriorDensity
 					      + BW[3] * SimulationGrid[InterpolationI0][InterpolationJ1].PriorDensity)
 	+ BW[1] * (BW[2] * SimulationGrid[InterpolationI1][InterpolationJ0].PriorDensity
 		   + BW[3] * SimulationGrid[InterpolationI1][InterpolationJ1].PriorDensity);
