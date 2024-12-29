@@ -242,7 +242,10 @@ internal void NSSimulationInit(){
     }
   }
   // SimulationGrid[300][300].SourceValue = 3;
-  for(int i = 300; i < 400; ++i){ for(int j = 300; j < 400; ++j){ SimulationGrid.DensitySources[IX(i,j)] = 1; }}
+  for(int i = 300; i < 400; ++i){ for(int j = 300; j < 400; ++j){
+      // SimulationGrid.DensitySources[IX(i,j)] = 1;
+      SimulationGrid.PriorDensity[IX(i,j)] = 5;
+    }}
 }
 
 
@@ -252,13 +255,15 @@ internal void SimulationDriver(){
   // 1: Density Simulation
   
   // a: Sourcing
-  for(int i = 1; i < GlobalHeight; ++i){
-    for(int j = 1; j < GlobalWidth; ++j){
-      SimulationGrid.Density[IX(i,j)] += SimulationGrid.DensitySources[IX(i,j)] * GlobalBaseDeltaTime;
+  for(int i = 1; i < GlobalWidth; ++i){
+    for(int j = 1; j < GlobalHeight; ++j){
+      // SimulationGrid.Density[IX(i,j)] += SimulationGrid.DensitySources[IX(i,j)] * GlobalBaseDeltaTime;
+      SimulationGrid.Density[IX(i,j)] += SimulationGrid.PriorDensity[IX(i,j)] * GlobalBaseDeltaTime;
     }
   }
 
   // TODO: switch to Gauss-Siedel relaxation if we see overflow
+  // IMMEDIATE TODO: debug function, is undoing additions from prior sourcing
   real32 DiffusionConstant = GlobalHeight * GlobalWidth * GlobalDiffusionRate * GlobalBaseDeltaTime;
   for(int i = 1; i <= GlobalWidth; ++i){
     for(int j = 1; j <= GlobalHeight; ++j){
