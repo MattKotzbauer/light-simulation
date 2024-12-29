@@ -59,15 +59,16 @@ struct NS_Pixel{
   real32 VelocityX;
   real32 VelocityY;
 
+  real32 AuxDensity;
   real32 PriorDensity;
   real32 PriorVelocityX;
   real32 PriorVelocityY;
 
-  real32 SourceValue;
+  real32 DensitySource;
 };
 
-global_variable real32 GlobalDiffusionRate = 5;
-global_variable uint8 GlobalBaseDeltaTime = 1;
+global_variable real32 GlobalDiffusionRate = 1.0f;
+global_variable real32 GlobalBaseDeltaTime = 20.0f;
 
 // TODO: make these configurable
 const int32 GlobalHeight = 720;
@@ -231,15 +232,15 @@ internal win32_window_dimension GetWindowDimension(HWND Window){
 /* Initialize contents of SimulationGrid on first frame */
 internal void NSSimulationInit(){
   // (we'll initialize to 0 for now)
-  for(int i = 0; i < GlobalHeight; ++i){
-    for(int j = 0; j < GlobalWidth; ++j){
-      SimulationGrid[i][j].SourceValue = 0;
+  for(int i = 1; i <= GlobalHeight; ++i){
+    for(int j = 1; j <= GlobalWidth; ++j){
+      SimulationGrid[i][j].DensitySource = 0;
       SimulationGrid[i][j].Density = 0;
       SimulationGrid[i][j].PriorDensity = 0;
     }
   }
   // SimulationGrid[300][300].SourceValue = 3;
-  for(int i = 300; i < 400; ++i){ for(int j = 300; j < 400; ++j){ SimulationGrid[i][j].SourceValue = 10; }}
+  for(int i = 300; i < 400; ++i){ for(int j = 300; j < 400; ++j){ SimulationGrid[i][j].DensitySource = 1; }}
 }
 
 
@@ -247,44 +248,78 @@ internal void SimulationDriver(){
   // A: Simluate 
 
   // 1: Density Simulation
-  //vreal32 AuxDensity = SimulationGrid[Y + 1][X + 1].Density;
   
-
-  // a: Source
+  // a: Sourcing
   for(int i = 1; i < GlobalHeight; ++i){
-    for(int j = 1; j < GlobalHeight; ++j){
-      SimulationGrid[i][j].Density += SimulationGrid[i][j].SourceValue;
+    for(int j = 1; j < GlobalWidth; ++j){
+      SimulationGrid[i][j].AuxDensity = SimulationGrid[i][j].Density;
+      SimulationGrid[i][j].Density += SimulationGrid[i][j].DensitySource * GlobalBaseDeltaTime;
     }
   }
 
   
-  // b: Diffusion Rate
-  real32 DiffusionConstant = GlobalHeight * GlobalWidth * GlobalDiffusionRate * (real32)GlobalBaseDeltaTime;
+  // b: Diffusion
+  real32 DiffusionConstant = GlobalHeight * GlobalWidth * GlobalDiffusionRate * GlobalBaseDeltaTime;
   for(int GaussSeidelIterations = 0; GaussSeidelIterations < 20; ++GaussSeidelIterations){
     for(int i = 1; i <= GlobalHeight; ++i){
       for(int j = 1; j <= GlobalWidth; ++j){
-	SimulationGrid[i][j].Density = SimulationGrid[i][j].PriorDensity
+	SimulationGrid[i][j].Density = (SimulationGrid[i][j].PriorDensity
 	  + DiffusionConstant * (SimulationGrid[i-1][j].Density + SimulationGrid[i+1][j].Density
 				 + SimulationGrid[i][j+1].Density + SimulationGrid[i][j-1].Density
-				 )/(1+4*DiffusionConstant);
+				 ))/(1+4*DiffusionConstant);
       }
     }
+    // TODO: set boundary
   }
-  
-	  
-	  
-  // c: 
+
+  /* 
+  // c: Advection
+  int32 InterpolationI0, InterpolationI1, InterpolationJ0, InterpolationJ1;
+  float BackTraceX, BackTraceY, RelativeDeltaTime;
+  float BW[4]; // (Bilinear Weights)
+  RelativeDeltaTime = GlobalBaseDeltaTime * (real32)((GlobalHeight + GlobalWidth)/2);
+  for(int i = 1; i <= GlobalWidth; ++i){
+    for(int j = 1; j <= GlobalHeight; ++j){
+
+      BackTraceX = i - (SimulationGrid[i][j].VelocityX * RelativeDeltaTime);
+      BackTraceY = j - (SimulationGrid[i][j].VelocityY * RelativeDeltaTime);
+
+      // (Normalize BackTraceX, BackTraceY)
+      if(BackTraceX < 0.5) BackTraceX = 0.5; if (BackTraceX > GlobalHeight + 0.5) BackTraceX = GlobalHeight + 0.5;
+      if(BackTraceY < 0.5) BackTraceY = 0.5; if (BackTraceY > GlobalWidth + 0.5) BackTraceY = GlobalWidth + 0.5;
+
+      InterpolationI0 = (int32)BackTraceX; InterpolationI1 = InterpolationI0 + 1;
+      InterpolationJ0 = (int32)BackTraceY; InterpolationJ1 = InterpolationJ0 + 1;
+      
+      BW[1] = BackTraceX - InterpolationI0; BW[0] = 1 - BW[1];
+      BW[3] = BackTraceY - InterpolationJ0; BW[2] = 1 - BW[3];
+
+      SimulationGrid[i][j].Density = BW[0] * (BW[2] * SimulationGrid[InterpolationI0][InterpolationJ0].PriorDensity
+					      + BW[3] * SimulationGrid[InterpolationI0][InterpolationJ1].PriorDensity)
+	+ BW[1] * (BW[2] * SimulationGrid[InterpolationI1][InterpolationJ0].PriorDensity
+		   + BW[3] * SimulationGrid[InterpolationI1][InterpolationJ1].PriorDensity);
+
+ 
+      
+      // TODO: set boundary
+      
+    }
+  }
+
+  */
 	  
   // 2: (Velocity Simulation)
 
 
   // Other Variable Changes:
-  for(int i = 0; i < GlobalHeight; ++i){
-    for(int j = 0; j < GlobalWidth; ++j){
-      
+  for(int i = 1; i <= GlobalHeight; ++i){
+    for(int j = 1; j <= GlobalWidth; ++j){
+      // (Overflow cleanup)
+      SimulationGrid[i][j].Density = (SimulationGrid[i][j].Density > 255) ? 255 : SimulationGrid[i][j].Density;
+      // (Update prior densities)
+      SimulationGrid[i][j].PriorDensity = SimulationGrid[i][j].Density;
     }
   }
-  // SimulationGrid[Y + 1][X + 1].PriorDensity = AuxDensity;
 	  
 }
 
