@@ -272,14 +272,14 @@ internal void SimulationDriver(){
     // TODO: set boundary
   }
 
-  /* 
+  
   // c: Advection
   int32 InterpolationI0, InterpolationI1, InterpolationJ0, InterpolationJ1;
   float BackTraceX, BackTraceY, RelativeDeltaTime;
   float BW[4]; // (Bilinear Weights)
   RelativeDeltaTime = GlobalBaseDeltaTime * (real32)((GlobalHeight + GlobalWidth)/2);
-  for(int i = 1; i <= GlobalWidth; ++i){
-    for(int j = 1; j <= GlobalHeight; ++j){
+  for(int j = 1; j <= GlobalHeight; ++j){
+    for(int i = 1; i <= GlobalWidth; ++i){
 
       BackTraceX = i - (SimulationGrid[i][j].VelocityX * RelativeDeltaTime);
       BackTraceY = j - (SimulationGrid[i][j].VelocityY * RelativeDeltaTime);
@@ -306,7 +306,7 @@ internal void SimulationDriver(){
     }
   }
 
-  */
+ 
 	  
   // 2: (Velocity Simulation)
 
