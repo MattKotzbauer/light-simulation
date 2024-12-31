@@ -75,7 +75,10 @@ struct SimulationData{
   real32* PriorVelocityX;
   real32* VelocityY;
   real32* PriorVelocityY;
+
   real32* DensitySources;
+  real32* VelocityXSources;
+  real32* VelocityYSources;
   
   real32 DensityData[FullSize];
   real32 PriorDensityData[FullSize];
@@ -83,7 +86,10 @@ struct SimulationData{
   real32 PriorVelocityXData[FullSize];
   real32 VelocityYData[FullSize];
   real32 PriorVelocityYData[FullSize];
+  
   real32 DensitySourcesData[FullSize];
+  real32 VelocityXSourcesData[FullSize];
+  real32 VelocityYSourcesData[FullSize];
   // (add in vars as necessary)
   
 };
@@ -252,7 +258,10 @@ internal void NSSimulationInit(){
   SimulationGrid.PriorVelocityX = SimulationGrid.PriorVelocityXData;
   SimulationGrid.VelocityY = SimulationGrid.VelocityYData;
   SimulationGrid.PriorVelocityY = SimulationGrid.PriorVelocityYData;
+
   SimulationGrid.DensitySources = SimulationGrid.DensitySourcesData;
+  SimulationGrid.VelocityXSources = SimulationGrid.VelocityXSourcesData;
+  SimulationGrid.VelocityYSources = SimulationGrid.VelocityYSourcesData;
   
   // (we'll initialize to 0 for now)
   for(int i = 0; i <= GlobalWidth + 1; ++i){
@@ -369,7 +378,8 @@ internal void SimulationDriver(){
   NSAdvect(SimulationGrid.Density, SimulationGrid.PriorDensity);
 
   // 2: Velocity Operations
-  
+  NSAddSource(SimulationGrid.VelocityX, SimulationGrid.VelocityXSources);
+  NSAddSource(SimulationGrid.VelocityY, SimulationGrid.VelocityYSources);
 
   
   // (3: Overflow Prevention / Cleanup)
