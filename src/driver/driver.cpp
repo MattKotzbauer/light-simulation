@@ -9,13 +9,12 @@
 
 /*
 Large-scale TODO's:
+* move simulation functions to a helper file that we then import
 * HSV conversion (have colors correspond to varying values of dark blue as start)
-* change SimulationGrid to be set of contiguous arrays
 * change SimulationDriver() call to have pointer to simulation grid as parameter, then also pass into SimulationRender(), then we can remove globals
 * (control saturation through pixel guy)
 
-
-(* clean up imported libraries)
+(* clean up imported libraries: math.h, stdio.h may not be necessary, as well as xinput, etc dependeing on how we're processing input)
   
  */
 
@@ -273,7 +272,38 @@ internal void NSSimulationInit(){
 }
 
 
-internal void VelocityProject(){
+
+internal void NSAddSource(real32* Source, real32* Destination){
+  // Sourcing
+  for(int i = 1; i <= GlobalWidth; ++i){
+    for(int j = 1; j <= GlobalHeight; ++j){
+      Destination[IX(i,j)] += Source[IX(i,j)] * GlobalBaseDeltaTime;
+    }
+  }
+}
+
+internal void NSDiffuse(){
+  // Gauss-Seidel Relaxation (20 passes): 
+  real32 DiffusionConstant = GlobalDiffusionRate * GlobalBaseDeltaTime;
+  
+  for(int GaussSeidelIterations = 0; GaussSeidelIterations < 20; ++GaussSeidelIterations){
+    for(int i = 1; i <= GlobalWidth; ++i){
+      for(int j = 1; j <= GlobalHeight; ++j){
+	SimulationGrid.Density[IX(i,j)] = (SimulationGrid.PriorDensity[IX(i,j)] +
+					   DiffusionConstant * (
+								SimulationGrid.Density[IX(i-1,j)] + 
+								SimulationGrid.Density[IX(i+1,j)] +
+								SimulationGrid.Density[IX(i,j-1)] +
+								SimulationGrid.Density[IX(i,j+1)]
+								))/(1 + 4 * DiffusionConstant);
+      }}}
+}
+
+internal void NSAdvect(){
+
+}
+
+internal void NSProject(){
   for(int i = 1; i <= GlobalWidth; ++i){
     for(int j = 1; j <= GlobalHeight; ++j){
       
@@ -288,28 +318,9 @@ internal void SimulationDriver(){
   real32* SwapPointer;
   
   // a: Sourcing
-  for(int i = 1; i <= GlobalWidth; ++i){
-    for(int j = 1; j <= GlobalHeight; ++j){
-      SimulationGrid.PriorDensity[IX(i,j)] += SimulationGrid.DensitySources[IX(i,j)] * GlobalBaseDeltaTime;
-    }
-  }
+  NSAddSource(SimulationGrid.DensitySources, SimulationGrid.PriorDensity);
 
-  // Gauss-Seidel Relaxation (20 passes): 
-  real32 DiffusionConstant = GlobalDiffusionRate * GlobalBaseDeltaTime;
-  for(int GaussSeidelIterations = 0; GaussSeidelIterations < 20; ++GaussSeidelIterations){
-    for(int i = 1; i <= GlobalWidth; ++i){
-      for(int j = 1; j <= GlobalHeight; ++j){
-	SimulationGrid.Density[IX(i,j)] = (SimulationGrid.PriorDensity[IX(i,j)] +
-					   DiffusionConstant * (
-								SimulationGrid.Density[IX(i-1,j)] + 
-								SimulationGrid.Density[IX(i+1,j)] +
-								SimulationGrid.Density[IX(i,j-1)] +
-								SimulationGrid.Density[IX(i,j+1)]
-								))/(1 + 4 * DiffusionConstant);
-
-      }}}
-
-
+  NSDiffuse();
   
   SwapPointer = SimulationGrid.PriorDensity;
   SimulationGrid.PriorDensity = SimulationGrid.Density;
