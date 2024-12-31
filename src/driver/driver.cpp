@@ -67,7 +67,6 @@ const int32 GlobalWidth = 1280;
 // TODO: (when using, bound queries to be within the GlobalWidth, GlobalHeight bounds)
 #define IX(i,j) (i+(GlobalWidth+2)*(j))
 
-const int32 FullSize = (GlobalWidth + 2) * (GlobalHeight + 2);
 struct SimulationData{
   real32* Density;
   real32* PriorDensity;
@@ -79,23 +78,21 @@ struct SimulationData{
   real32* DensitySources;
   real32* VelocityXSources;
   real32* VelocityYSources;
-  
-  real32 DensityData[FullSize];
-  real32 PriorDensityData[FullSize];
-  real32 VelocityXData[FullSize];
-  real32 PriorVelocityXData[FullSize];
-  real32 VelocityYData[FullSize];
-  real32 PriorVelocityYData[FullSize];
-  
-  real32 DensitySourcesData[FullSize];
-  real32 VelocityXSourcesData[FullSize];
-  real32 VelocityYSourcesData[FullSize];
-  // (add in vars as necessary)
-  
 };
 
 global_variable SimulationData SimulationGrid;
 
+global_variable real32** SimulationArrays[] = {
+  &SimulationGrid.Density,
+  &SimulationGrid.PriorDensity,
+  &SimulationGrid.VelocityX,
+  &SimulationGrid.PriorVelocityX,
+  &SimulationGrid.VelocityY,
+  &SimulationGrid.PriorVelocityY,
+  &SimulationGrid.DensitySources,
+  &SimulationGrid.VelocityXSources,
+  &SimulationGrid.VelocityYSources
+};
 
 global_variable bool GlobalRunning;
 // TODO: convert into pair of single-dimensional arrays for density and velocity
@@ -251,30 +248,19 @@ internal win32_window_dimension GetWindowDimension(HWND Window){
 
 /* Initialize contents of SimulationGrid on first frame */
 internal void NSSimulationInit(){
+  int32 ArrayCount = sizeof(SimulationArrays) / sizeof(SimulationArrays[0]);
+  int32 ArraySize = sizeof(real32) * (GlobalWidth + 2) * (GlobalHeight + 2);
 
-  SimulationGrid.Density = SimulationGrid.DensityData;
-  SimulationGrid.PriorDensity = SimulationGrid.PriorDensityData;
-  SimulationGrid.VelocityX = SimulationGrid.VelocityXData;
-  SimulationGrid.PriorVelocityX = SimulationGrid.PriorVelocityXData;
-  SimulationGrid.VelocityY = SimulationGrid.VelocityYData;
-  SimulationGrid.PriorVelocityY = SimulationGrid.PriorVelocityYData;
-
-  SimulationGrid.DensitySources = SimulationGrid.DensitySourcesData;
-  SimulationGrid.VelocityXSources = SimulationGrid.VelocityXSourcesData;
-  SimulationGrid.VelocityYSources = SimulationGrid.VelocityYSourcesData;
+  for(int ArrayIndex = 0; ArrayIndex < ArrayCount; ++ArrayIndex){
+    *SimulationArrays[ArrayIndex] = (real32*)VirtualAlloc(0, ArraySize, MEM_COMMIT, PAGE_READWRITE);
+  }
   
   // (we'll initialize to 0 for now)
-  for(int i = 0; i <= GlobalWidth + 1; ++i){
-    for(int j = 0; j <= GlobalHeight + 1; ++j){
-
-      SimulationGrid.Density[IX(i,j)] = 0;
-      SimulationGrid.PriorDensity[IX(i,j)] = 0;
-      SimulationGrid.VelocityX[IX(i,j)] = 0;
-      SimulationGrid.PriorVelocityX[IX(i,j)] = 0;
-      SimulationGrid.VelocityY[IX(i,j)] = 0;
-      SimulationGrid.PriorVelocityY[IX(i,j)] = 0;
-      SimulationGrid.DensitySources[IX(i,j)] = 0;
-      
+  for(int ArrayIndex = 0; ArrayIndex < ArrayCount; ++ArrayIndex){
+    for(int i = 0; i <= GlobalWidth + 1; ++i){
+      for(int j = 0; j <= GlobalHeight + 1; ++j){
+	(*SimulationArrays[ArrayIndex])[IX(i,j)] = 0;
+      }      
     }
   }
   // SimulationGrid[300][300].SourceValue = 3;
