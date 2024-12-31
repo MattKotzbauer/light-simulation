@@ -9,10 +9,14 @@
 
 /*
 Large-scale TODO's:
+
+
 * move simulation functions to a helper file that we then import
 * HSV conversion (have colors correspond to varying values of dark blue as start)
 * change SimulationDriver() call to have pointer to simulation grid as parameter, then also pass into SimulationRender(), then we can remove globals
 * (control saturation through pixel guy)
+
+* (play around and see if there's an easier way to instantiate arrays / allocate memory: could have pointer be to malloc call of size (sizeof(real32) *  (GlobalHeight + 2) * (GlobalWidth + 2)), which could be allocated within SimulationInit, though may want to use some type of static marker to ensure they're stored in data segment rather than on stack, since may stack overflow)
 
 (* clean up imported libraries: math.h, stdio.h may not be necessary, as well as xinput, etc dependeing on how we're processing input)
   
@@ -272,9 +276,16 @@ internal void NSSimulationInit(){
 }
 
 
+internal void NSUpdate(real32* &PriorValues, real32* &CurrentValues){
+  real32* SwapPointer = PriorValues;
+  PriorValues = CurrentValues;
+  CurrentValues = SwapPointer;
+  
+}
+  
 
-internal void NSAddSource(real32* Source, real32* Destination){
-  // Sourcing
+internal void NSAddSource(real32* Destination, real32* Source){
+  // (Sourcing Step)
   for(int i = 1; i <= GlobalWidth; ++i){
     for(int j = 1; j <= GlobalHeight; ++j){
       Destination[IX(i,j)] += Source[IX(i,j)] * GlobalBaseDeltaTime;
@@ -282,7 +293,8 @@ internal void NSAddSource(real32* Source, real32* Destination){
   }
 }
 
-internal void NSDiffuse(){
+
+internal void NSDiffuse(real32* DiffusionTarget, real32* TargetPrior){
   // Gauss-Seidel Relaxation (20 passes): 
   real32 DiffusionConstant = GlobalDiffusionRate * GlobalBaseDeltaTime;
   
@@ -299,37 +311,8 @@ internal void NSDiffuse(){
       }}}
 }
 
-internal void NSAdvect(){
 
-}
-
-internal void NSProject(){
-  for(int i = 1; i <= GlobalWidth; ++i){
-    for(int j = 1; j <= GlobalHeight; ++j){
-      
-    }
-  }
-  // TODO: set velocity boundary
-  
-}
-
-internal void SimulationDriver(){
-  // 1: Density Simulation
-  real32* SwapPointer;
-  
-  // a: Sourcing
-  NSAddSource(SimulationGrid.DensitySources, SimulationGrid.PriorDensity);
-
-  NSDiffuse();
-  
-  SwapPointer = SimulationGrid.PriorDensity;
-  SimulationGrid.PriorDensity = SimulationGrid.Density;
-  SimulationGrid.Density = SwapPointer;
-  
-
-  // NOTE: unless we write the current density values into PriorDensity, advection is essentially going to override anything we've done in diffusion
-  
-  // c: Advection
+internal void NSAdvect(real32* AdvectionTarget, real32* TargetPrior){
   int32 InterpolationI0, InterpolationI1, InterpolationJ0, InterpolationJ1;
   float BackTraceX, BackTraceY, RelativeDeltaTime;
   float BW[4]; // (Bilinear Weights)
@@ -349,32 +332,57 @@ internal void SimulationDriver(){
       BW[1] = BackTraceX - InterpolationI0; BW[0] = 1 - BW[1];
       BW[3] = BackTraceY - InterpolationJ0; BW[2] = 1 - BW[3];
 
-      SimulationGrid.Density[IX(i,j)] =
+      AdvectionTarget[IX(i,j)] =
 	BW[0] *
-	(BW[2] * SimulationGrid.PriorDensity[IX(InterpolationI0,InterpolationJ0)]
-	 + BW[3] * SimulationGrid.PriorDensity[IX(InterpolationI0,InterpolationJ1)]) + 
+	(BW[2] * TargetPrior[IX(InterpolationI0,InterpolationJ0)]
+	 + BW[3] * TargetPrior[IX(InterpolationI0,InterpolationJ1)]) + 
 	BW[1] *
-	(BW[2] * SimulationGrid.PriorDensity[IX(InterpolationI1,InterpolationJ0)]
-	 + BW[3] * SimulationGrid.PriorDensity[IX(InterpolationI1,InterpolationJ1)]);
+	(BW[2] * TargetPrior[IX(InterpolationI1,InterpolationJ0)]
+	 + BW[3] * TargetPrior[IX(InterpolationI1,InterpolationJ1)]);
       
     }
   }
+}
 
-  // 2: (Velocity Simulation)
 
-
-  // Other Variable Changes:
+internal void NSProject(){
   for(int i = 1; i <= GlobalWidth; ++i){
     for(int j = 1; j <= GlobalHeight; ++j){
-      // (Overflow cleanup)
+      
+    }
+  }
+  // TODO: set velocity boundary
+  
+}
+
+
+internal void SimulationDriver(){
+
+  // 1: Density Operations
+
+  NSAddSource(SimulationGrid.PriorDensity, SimulationGrid.DensitySources);
+
+  NSDiffuse(SimulationGrid.Density, SimulationGrid.PriorDensity);
+
+  NSUpdate(SimulationGrid.PriorDensity, SimulationGrid.Density);
+    
+  NSAdvect(SimulationGrid.Density, SimulationGrid.PriorDensity);
+
+  // 2: Velocity Operations
+  
+
+  
+  // (3: Overflow Prevention / Cleanup)
+  for(int i = 1; i <= GlobalWidth; ++i){
+    for(int j = 1; j <= GlobalHeight; ++j){
+
       SimulationGrid.Density[IX(i,j)] = (SimulationGrid.Density[IX(i,j)] > 500) ? 500 : SimulationGrid.Density[IX(i,j)];
+
       SimulationGrid.PriorDensity[IX(i,j)] = (SimulationGrid.PriorDensity[IX(i,j)] > 500) ? 500 : SimulationGrid.PriorDensity[IX(i,j)];
     }
   }
 
-  SwapPointer = SimulationGrid.PriorDensity;
-  SimulationGrid.PriorDensity = SimulationGrid.Density;
-  SimulationGrid.Density = SwapPointer;
+  NSUpdate(SimulationGrid.PriorDensity, SimulationGrid.Density);
   
 }
 
