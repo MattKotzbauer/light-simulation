@@ -54,8 +54,8 @@ struct win32_offscreen_buffer
   int BytesPerPixel;
 };
 
-global_variable real32 GlobalDiffusionRate = .0001f;
-global_variable real32 GlobalBaseDeltaTime = 10.0f;
+global_variable real32 GlobalDiffusionRate = 1.0f;
+global_variable real32 GlobalBaseDeltaTime = 1.0f;
 
 // TODO: make these configurable
 const int32 GlobalHeight = 720;
@@ -243,28 +243,31 @@ internal void NSSimulationInit(){
   }
   // SimulationGrid[300][300].SourceValue = 3;
   for(int i = 300; i < 400; ++i){ for(int j = 300; j < 400; ++j){
-      // SimulationGrid.DensitySources[IX(i,j)] = 1;
-      SimulationGrid.PriorDensity[IX(i,j)] = 5;
+      SimulationGrid.PriorDensity[IX(i,j)] = 20;
+      SimulationGrid.DensitySources[IX(i,j)] = 10;
+      
     }}
 }
 
 
 internal void SimulationDriver(){
-  // A: Simluate 
-
   // 1: Density Simulation
   
   // a: Sourcing
-  for(int i = 1; i < GlobalWidth; ++i){
-    for(int j = 1; j < GlobalHeight; ++j){
+  for(int i = 1; i <= GlobalWidth; ++i){
+    for(int j = 1; j <= GlobalHeight; ++j){
       // SimulationGrid.Density[IX(i,j)] += SimulationGrid.DensitySources[IX(i,j)] * GlobalBaseDeltaTime;
-      SimulationGrid.Density[IX(i,j)] += SimulationGrid.PriorDensity[IX(i,j)] * GlobalBaseDeltaTime;
+      // SimulationGrid.Density[IX(i,j)] += SimulationGrid.PriorDensity[IX(i,j)] * GlobalBaseDeltaTime;
+      SimulationGrid.PriorDensity[IX(i,j)] += SimulationGrid.DensitySources[IX(i,j)] * GlobalBaseDeltaTime;
     }
   }
 
-  // TODO: switch to Gauss-Siedel relaxation if we see overflow
-  // IMMEDIATE TODO: debug function, is undoing additions from prior sourcing
-  real32 DiffusionConstant = GlobalHeight * GlobalWidth * GlobalDiffusionRate * GlobalBaseDeltaTime;
+  // TODO: switch to Gauss-Siedel relaxation if we see overflow (WHY IS IT NANing)
+
+  /* 
+  // "Bad Diffusion"
+  real32 DiffusionConstant = GlobalDiffusionRate * GlobalBaseDeltaTime;
+  
   for(int i = 1; i <= GlobalWidth; ++i){
     for(int j = 1; j <= GlobalHeight; ++j){
       SimulationGrid.Density[IX(i,j)] = SimulationGrid.PriorDensity[IX(i,j)] + DiffusionConstant *
@@ -273,9 +276,46 @@ internal void SimulationDriver(){
 	 SimulationGrid.PriorDensity[IX(i,j-1)] + SimulationGrid.PriorDensity[IX(i,j+1)] -
 	 4 * SimulationGrid.PriorDensity[IX(i,j)]
 	 );
+
+      // (Basic bounds check)
+      if(i == 1 || i == GlobalWidth || j == 1 || j == GlobalHeight) {
+	SimulationGrid.Density[IX(i,j)] = SimulationGrid.PriorDensity[IX(i,j)];
+      }
+      
     }
   }
+  */
+  
+   
+  // Gauss-Seidel Relaxation (20 passes): 
+  real32 DiffusionConstant = GlobalDiffusionRate * GlobalBaseDeltaTime;
+  for(int GaussSeidelIterations = 0; GaussSeidelIterations < 20; ++GaussSeidelIterations){
+    for(int i = 1; i <= GlobalWidth; ++i){
+      for(int j = 1; j <= GlobalHeight; ++j){
+	SimulationGrid.Density[IX(i,j)] = (SimulationGrid.PriorDensity[IX(i,j)] +
+					   DiffusionConstant * (
+								SimulationGrid.Density[IX(i-1,j)] + 
+								SimulationGrid.Density[IX(i+1,j)] +
+								SimulationGrid.Density[IX(i,j-1)] +
+								SimulationGrid.Density[IX(i,j+1)]
+								))/(1 + 4 * DiffusionConstant);
 
+	if(i == 300 && j == 300) {
+	  printf("Density at (300,300): %f\n", SimulationGrid.Density[IX(i,j)]);
+	  printf("Up neighbor: %f\n", SimulationGrid.Density[IX(i,j-1)]);
+	  printf("Down neighbor: %f\n", SimulationGrid.Density[IX(i,j+1)]);
+	  printf("Left neighbor: %f\n", SimulationGrid.Density[IX(i-1,j)]);
+	  printf("Right neighbor: %f\n", SimulationGrid.Density[IX(i+1,j)]);
+	}
+	
+      }}}
+  
+  
+  
+
+ 
+
+  /* Fairly sure this is correct for advection:
   // c: Advection
   int32 InterpolationI0, InterpolationI1, InterpolationJ0, InterpolationJ1;
   float BackTraceX, BackTraceY, RelativeDeltaTime;
@@ -307,6 +347,7 @@ internal void SimulationDriver(){
       
     }
   }
+  */
   // TODO: set boundary after advection
 
 
@@ -320,7 +361,9 @@ internal void SimulationDriver(){
   for(int i = 1; i <= GlobalWidth; ++i){
     for(int j = 1; j <= GlobalHeight; ++j){
       // (Overflow cleanup)
-      SimulationGrid.Density[IX(i,j)] = (SimulationGrid.Density[IX(i,j)] > 255) ? 255 : SimulationGrid.Density[IX(i,j)];
+      SimulationGrid.Density[IX(i,j)] = (SimulationGrid.Density[IX(i,j)] > 500) ? 500 : SimulationGrid.Density[IX(i,j)];
+      SimulationGrid.PriorDensity[IX(i,j)] = (SimulationGrid.PriorDensity[IX(i,j)] > 500) ? 500 : SimulationGrid.PriorDensity[IX(i,j)];
+      
       // (Update prior densities)
       SimulationGrid.PriorDensity[IX(i,j)] = SimulationGrid.Density[IX(i,j)];
     }
@@ -338,19 +381,18 @@ internal void SimulationRender(win32_offscreen_buffer *Buffer, int BlueOffset, i
       ++Y)
     {
       // (Row-wise iteration)
-      uint32 *Pixel = (uint32*) Row; 
+      uint32 *Pixel = (uint32*)Row; 
       for(int X = 0;
 	  X < Buffer->Width;
 	  ++X
 	  )
 	{
+	  // (pull color from simulation)
+	  // TODO: define function to convert to HSV
 	  real32 PixelDensity = SimulationGrid.Density[IX(X + 1, Y + 1)];
-	  // PixelDensity = 250;
+	  // (max against 255)
 	  uint8 Blue = (PixelDensity > 255) ? 255 : (uint8)PixelDensity;
-	  // Green:
-	  // uint8 Green = (Y + GreenOffset);
-	  // (Red Blank)
-	  // *Pixel++ = ((Green << 8) | Blue);
+	  // *Pixel++ = ((Green << 8) | Blue); // (pixel bytes are (blank)RGB, 4 bytes)
 	  *Pixel++ = Blue;
 	}
 
@@ -509,7 +551,7 @@ int WINAPI WinMain(HINSTANCE Instance,
   
   WNDCLASSA WindowClass = {};
 
-  Win64ResizeDIBSection(&GlobalBackBuffer, 1280, 720);
+  Win64ResizeDIBSection(&GlobalBackBuffer, GlobalWidth, GlobalHeight);
 
   NSSimulationInit();
   
@@ -529,7 +571,7 @@ int WINAPI WinMain(HINSTANCE Instance,
       HWND Window = CreateWindowExA(
 				    0,
 				    WindowClass.lpszClassName,
-				    "Handmade Hero",
+				    "Fluid Sim v1",
 				    WS_OVERLAPPEDWINDOW|WS_VISIBLE,
 				    CW_USEDEFAULT,
 				    CW_USEDEFAULT,
