@@ -62,7 +62,7 @@ const int32 GlobalHeight = 720;
 const int32 GlobalWidth = 1280;
 
 // TODO: (when using, bound queries to be within the GlobalWidth, GlobalHeight bounds)
-#define IX(i,j) (i+(GlobalWidth+2)*j)
+#define IX(i,j) (i+(GlobalWidth+2)*(j))
 
 const int32 FullSize = (GlobalWidth + 2) * (GlobalHeight + 2);
 struct SimulationData{
@@ -243,9 +243,8 @@ internal void NSSimulationInit(){
   }
   // SimulationGrid[300][300].SourceValue = 3;
   for(int i = 300; i < 400; ++i){ for(int j = 300; j < 400; ++j){
-      SimulationGrid.PriorDensity[IX(i,j)] = 20;
       SimulationGrid.DensitySources[IX(i,j)] = 10;
-      
+      if(i > 350){SimulationGrid.DensitySources[IX(i,j)] = 0; SimulationGrid.VelocityX[IX(i,j)] = 5;}
     }}
 }
 
@@ -256,37 +255,10 @@ internal void SimulationDriver(){
   // a: Sourcing
   for(int i = 1; i <= GlobalWidth; ++i){
     for(int j = 1; j <= GlobalHeight; ++j){
-      // SimulationGrid.Density[IX(i,j)] += SimulationGrid.DensitySources[IX(i,j)] * GlobalBaseDeltaTime;
-      // SimulationGrid.Density[IX(i,j)] += SimulationGrid.PriorDensity[IX(i,j)] * GlobalBaseDeltaTime;
       SimulationGrid.PriorDensity[IX(i,j)] += SimulationGrid.DensitySources[IX(i,j)] * GlobalBaseDeltaTime;
     }
   }
 
-  // TODO: switch to Gauss-Siedel relaxation if we see overflow (WHY IS IT NANing)
-
-  /* 
-  // "Bad Diffusion"
-  real32 DiffusionConstant = GlobalDiffusionRate * GlobalBaseDeltaTime;
-  
-  for(int i = 1; i <= GlobalWidth; ++i){
-    for(int j = 1; j <= GlobalHeight; ++j){
-      SimulationGrid.Density[IX(i,j)] = SimulationGrid.PriorDensity[IX(i,j)] + DiffusionConstant *
-	(
-	 SimulationGrid.PriorDensity[IX(i-1,j)] + SimulationGrid.PriorDensity[IX(i+1,j)] +
-	 SimulationGrid.PriorDensity[IX(i,j-1)] + SimulationGrid.PriorDensity[IX(i,j+1)] -
-	 4 * SimulationGrid.PriorDensity[IX(i,j)]
-	 );
-
-      // (Basic bounds check)
-      if(i == 1 || i == GlobalWidth || j == 1 || j == GlobalHeight) {
-	SimulationGrid.Density[IX(i,j)] = SimulationGrid.PriorDensity[IX(i,j)];
-      }
-      
-    }
-  }
-  */
-  
-   
   // Gauss-Seidel Relaxation (20 passes): 
   real32 DiffusionConstant = GlobalDiffusionRate * GlobalBaseDeltaTime;
   for(int GaussSeidelIterations = 0; GaussSeidelIterations < 20; ++GaussSeidelIterations){
@@ -300,32 +272,27 @@ internal void SimulationDriver(){
 								SimulationGrid.Density[IX(i,j+1)]
 								))/(1 + 4 * DiffusionConstant);
 
-	if(i == 300 && j == 300) {
-	  printf("Density at (300,300): %f\n", SimulationGrid.Density[IX(i,j)]);
-	  printf("Up neighbor: %f\n", SimulationGrid.Density[IX(i,j-1)]);
-	  printf("Down neighbor: %f\n", SimulationGrid.Density[IX(i,j+1)]);
-	  printf("Left neighbor: %f\n", SimulationGrid.Density[IX(i-1,j)]);
-	  printf("Right neighbor: %f\n", SimulationGrid.Density[IX(i+1,j)]);
-	}
-	
       }}}
-  
-  
-  
 
- 
 
-  /* Fairly sure this is correct for advection:
+  /* 
+  real32 *foo;
+  foo = SimulationGrid.PriorDensity;
+  SimulationGrid.PriorDensity = SimulationGrid.Density;
+  SimulationGrid.Density = foo;
+  */
+
+  // NOTE: unless we write the current density values into PriorDensity, advection is essentially going to override anything we've done in diffusion
+  
   // c: Advection
   int32 InterpolationI0, InterpolationI1, InterpolationJ0, InterpolationJ1;
   float BackTraceX, BackTraceY, RelativeDeltaTime;
   float BW[4]; // (Bilinear Weights)
-  RelativeDeltaTime = GlobalBaseDeltaTime * (real32)((GlobalHeight + GlobalWidth)/2);
   for(int i = 1; i < GlobalWidth; ++i){
     for(int j = 1; j < GlobalHeight; ++j){
 
-      BackTraceX = i - (SimulationGrid.VelocityX[IX(i,j)] * RelativeDeltaTime);
-      BackTraceY = j - (SimulationGrid.VelocityY[IX(i,j)] * RelativeDeltaTime);
+      BackTraceX = i - (SimulationGrid.VelocityX[IX(i,j)] * GlobalBaseDeltaTime);
+      BackTraceY = j - (SimulationGrid.VelocityY[IX(i,j)] * GlobalBaseDeltaTime);
 
       // (Normalize BackTraceX, BackTraceY)
       if(BackTraceX < 0.5) BackTraceX = 0.5; if (BackTraceX > GlobalHeight + 0.5) BackTraceX = GlobalWidth + 0.5;
@@ -347,13 +314,7 @@ internal void SimulationDriver(){
       
     }
   }
-  */
-  // TODO: set boundary after advection
 
-
-  
- 
-	  
   // 2: (Velocity Simulation)
 
 
@@ -393,7 +354,7 @@ internal void SimulationRender(win32_offscreen_buffer *Buffer, int BlueOffset, i
 	  // (max against 255)
 	  uint8 Blue = (PixelDensity > 255) ? 255 : (uint8)PixelDensity;
 	  // *Pixel++ = ((Green << 8) | Blue); // (pixel bytes are (blank)RGB, 4 bytes)
-	  *Pixel++ = Blue;
+	  *Pixel++ = ((Blue << 16) | (Blue << 8) | Blue);
 	}
 
       Row += Buffer->Pitch;
