@@ -66,12 +66,21 @@ const int32 GlobalWidth = 1280;
 
 const int32 FullSize = (GlobalWidth + 2) * (GlobalHeight + 2);
 struct SimulationData{
-  real32 Density[FullSize];
-  real32 VelocityX[FullSize];
-  real32 VelocityY[FullSize];
+  real32* Density;
+  real32* PriorDensity;
+  real32* VelocityX;
+  real32* PriorVelocityX;
+  real32* VelocityY;
+  real32* PriorVelocityY;
+  real32* DensitySources;
   
-  real32 PriorDensity[FullSize];
-  real32 DensitySources[FullSize];
+  real32 DensityData[FullSize];
+  real32 PriorDensityData[FullSize];
+  real32 VelocityXData[FullSize];
+  real32 PriorVelocityXData[FullSize];
+  real32 VelocityYData[FullSize];
+  real32 PriorVelocityYData[FullSize];
+  real32 DensitySourcesData[FullSize];
   // (add in vars as necessary)
   
 };
@@ -233,12 +242,27 @@ internal win32_window_dimension GetWindowDimension(HWND Window){
 
 /* Initialize contents of SimulationGrid on first frame */
 internal void NSSimulationInit(){
+
+  SimulationGrid.Density = SimulationGrid.DensityData;
+  SimulationGrid.PriorDensity = SimulationGrid.PriorDensityData;
+  SimulationGrid.VelocityX = SimulationGrid.VelocityXData;
+  SimulationGrid.PriorVelocityX = SimulationGrid.PriorVelocityXData;
+  SimulationGrid.VelocityY = SimulationGrid.VelocityYData;
+  SimulationGrid.PriorVelocityY = SimulationGrid.PriorVelocityYData;
+  SimulationGrid.DensitySources = SimulationGrid.DensitySourcesData;
+  
   // (we'll initialize to 0 for now)
   for(int i = 0; i <= GlobalWidth + 1; ++i){
     for(int j = 0; j <= GlobalHeight + 1; ++j){
-      SimulationGrid.DensitySources[IX(i,j)] = 0;
+
       SimulationGrid.Density[IX(i,j)] = 0;
       SimulationGrid.PriorDensity[IX(i,j)] = 0;
+      SimulationGrid.VelocityX[IX(i,j)] = 0;
+      SimulationGrid.PriorVelocityX[IX(i,j)] = 0;
+      SimulationGrid.VelocityY[IX(i,j)] = 0;
+      SimulationGrid.PriorVelocityY[IX(i,j)] = 0;
+      SimulationGrid.DensitySources[IX(i,j)] = 0;
+      
     }
   }
   // SimulationGrid[300][300].SourceValue = 3;
@@ -249,8 +273,19 @@ internal void NSSimulationInit(){
 }
 
 
+internal void VelocityProject(){
+  for(int i = 1; i <= GlobalWidth; ++i){
+    for(int j = 1; j <= GlobalHeight; ++j){
+      
+    }
+  }
+  // TODO: set velocity boundary
+  
+}
+
 internal void SimulationDriver(){
   // 1: Density Simulation
+  real32* SwapPointer;
   
   // a: Sourcing
   for(int i = 1; i <= GlobalWidth; ++i){
@@ -275,12 +310,11 @@ internal void SimulationDriver(){
       }}}
 
 
-  /* 
-  real32 *foo;
-  foo = SimulationGrid.PriorDensity;
+  
+  SwapPointer = SimulationGrid.PriorDensity;
   SimulationGrid.PriorDensity = SimulationGrid.Density;
-  SimulationGrid.Density = foo;
-  */
+  SimulationGrid.Density = SwapPointer;
+  
 
   // NOTE: unless we write the current density values into PriorDensity, advection is essentially going to override anything we've done in diffusion
   
@@ -324,12 +358,13 @@ internal void SimulationDriver(){
       // (Overflow cleanup)
       SimulationGrid.Density[IX(i,j)] = (SimulationGrid.Density[IX(i,j)] > 500) ? 500 : SimulationGrid.Density[IX(i,j)];
       SimulationGrid.PriorDensity[IX(i,j)] = (SimulationGrid.PriorDensity[IX(i,j)] > 500) ? 500 : SimulationGrid.PriorDensity[IX(i,j)];
-      
-      // (Update prior densities)
-      SimulationGrid.PriorDensity[IX(i,j)] = SimulationGrid.Density[IX(i,j)];
     }
   }
-	  
+
+  SwapPointer = SimulationGrid.PriorDensity;
+  SimulationGrid.PriorDensity = SimulationGrid.Density;
+  SimulationGrid.Density = SwapPointer;
+  
 }
 
 /* Render animated pixel content into Buffer */
