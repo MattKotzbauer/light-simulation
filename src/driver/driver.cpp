@@ -367,6 +367,12 @@ internal void SimulationDriver(){
   NSAddSource(SimulationGrid.VelocityX, SimulationGrid.VelocityXSources);
   NSAddSource(SimulationGrid.VelocityY, SimulationGrid.VelocityYSources);
 
+  NSUpdate(SimulationGrid.VelocityX, SimulationGrid.PriorVelocityX);
+  NSDiffuse(SimulationGrid.VelocityX, SimulationGrid.PriorVelocityX);
+  
+  NSUpdate(SimulationGrid.VelocityY, SimulationGrid.PriorVelocityY);
+  NSDiffuse(SimulationGrid.VelocityY, SimulationGrid.PriorVelocityY);
+  
   
   // (3: Overflow Prevention / Cleanup)
   for(int i = 1; i <= GlobalWidth; ++i){
