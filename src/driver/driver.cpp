@@ -63,9 +63,16 @@ global_variable real32 GlobalBaseDeltaTime = 1.0f;
 // TODO: make these configurable
 const int32 GlobalHeight = 720;
 const int32 GlobalWidth = 1280;
+// const int32 SimulationHeight = 720;
+// const int32 SimulationWidth = 1280;
+const int32 SimulationHeight = 180;
+const int32 SimulationWidth = 320;
+
+const int32 GlobalXScale = GlobalWidth / SimulationWidth;
+const int32 GlobalYScale = GlobalHeight / SimulationHeight;
 
 // TODO: (when using, bound queries to be within the GlobalWidth, GlobalHeight bounds)
-#define IX(i,j) (i+(GlobalWidth+2)*(j))
+#define IX(i,j) (i+(SimulationWidth+2)*(j))
 
 struct SimulationData{
   real32* Density;
@@ -249,7 +256,7 @@ internal win32_window_dimension GetWindowDimension(HWND Window){
 /* Initialize contents of SimulationGrid on first frame */
 internal void NSSimulationInit(){
   int32 ArrayCount = sizeof(SimulationArrays) / sizeof(SimulationArrays[0]);
-  int32 ArraySize = sizeof(real32) * (GlobalWidth + 2) * (GlobalHeight + 2);
+  int32 ArraySize = sizeof(real32) * (SimulationWidth + 2) * (SimulationHeight + 2);
 
   for(int ArrayIndex = 0; ArrayIndex < ArrayCount; ++ArrayIndex){
     *SimulationArrays[ArrayIndex] = (real32*)VirtualAlloc(0, ArraySize, MEM_COMMIT, PAGE_READWRITE);
@@ -257,16 +264,20 @@ internal void NSSimulationInit(){
   
   // (we'll initialize to 0 for now)
   for(int ArrayIndex = 0; ArrayIndex < ArrayCount; ++ArrayIndex){
-    for(int i = 0; i <= GlobalWidth + 1; ++i){
-      for(int j = 0; j <= GlobalHeight + 1; ++j){
+    for(int i = 0; i <= SimulationWidth + 1; ++i){
+      for(int j = 0; j <= SimulationHeight + 1; ++j){
 	(*SimulationArrays[ArrayIndex])[IX(i,j)] = 0;
       }      
     }
   }
+
+  // TEMPORARY: manual allocation of density / velocity
   // SimulationGrid[300][300].SourceValue = 3;
-  for(int i = 300; i < 400; ++i){ for(int j = 300; j < 400; ++j){
+  for(int i = 50; i < 100; ++i){ for(int j = 50; j < 100; ++j){
       SimulationGrid.DensitySources[IX(i,j)] = 10;
-      if(i > 350){SimulationGrid.DensitySources[IX(i,j)] = 0; SimulationGrid.VelocityX[IX(i,j)] = 5;}
+      SimulationGrid.VelocityXSources[IX(i,j)] = 5;
+      if(i > 75){SimulationGrid.DensitySources[IX(i,j)] = 0;
+	}
     }}
 }
 
@@ -281,8 +292,8 @@ internal void NSUpdate(real32* &PriorValues, real32* &CurrentValues){
 
 internal void NSAddSource(real32* Destination, real32* Source){
   // (Sourcing Step)
-  for(int i = 1; i <= GlobalWidth; ++i){
-    for(int j = 1; j <= GlobalHeight; ++j){
+  for(int i = 1; i <= SimulationWidth; ++i){
+    for(int j = 1; j <= SimulationHeight; ++j){
       Destination[IX(i,j)] += Source[IX(i,j)] * GlobalBaseDeltaTime;
     }
   }
@@ -294,8 +305,8 @@ internal void NSDiffuse(real32* DiffusionTarget, real32* TargetPrior){
   real32 DiffusionConstant = GlobalDiffusionRate * GlobalBaseDeltaTime;
   
   for(int GaussSeidelIterations = 0; GaussSeidelIterations < 20; ++GaussSeidelIterations){
-    for(int i = 1; i <= GlobalWidth; ++i){
-      for(int j = 1; j <= GlobalHeight; ++j){
+    for(int i = 1; i <= SimulationWidth; ++i){
+      for(int j = 1; j <= SimulationHeight; ++j){
 	SimulationGrid.Density[IX(i,j)] = (SimulationGrid.PriorDensity[IX(i,j)] +
 					   DiffusionConstant * (
 								SimulationGrid.Density[IX(i-1,j)] + 
@@ -311,15 +322,15 @@ internal void NSAdvect(real32* AdvectionTarget, real32* TargetPrior){
   int32 InterpolationI0, InterpolationI1, InterpolationJ0, InterpolationJ1;
   float BackTraceX, BackTraceY, RelativeDeltaTime;
   float BW[4]; // (Bilinear Weights)
-  for(int i = 1; i < GlobalWidth; ++i){
-    for(int j = 1; j < GlobalHeight; ++j){
+  for(int i = 1; i < SimulationWidth; ++i){
+    for(int j = 1; j < SimulationHeight; ++j){
 
       BackTraceX = i - (SimulationGrid.VelocityX[IX(i,j)] * GlobalBaseDeltaTime);
       BackTraceY = j - (SimulationGrid.VelocityY[IX(i,j)] * GlobalBaseDeltaTime);
 
       // (Normalize BackTraceX, BackTraceY)
-      if(BackTraceX < 0.5) BackTraceX = 0.5; if (BackTraceX > GlobalHeight + 0.5) BackTraceX = GlobalWidth + 0.5;
-      if(BackTraceY < 0.5) BackTraceY = 0.5; if (BackTraceY > GlobalWidth + 0.5) BackTraceY = GlobalHeight + 0.5;
+      if(BackTraceX < 0.5) BackTraceX = 0.5; if (BackTraceX > SimulationHeight + 0.5) BackTraceX = SimulationWidth + 0.5;
+      if(BackTraceY < 0.5) BackTraceY = 0.5; if (BackTraceY > SimulationWidth + 0.5) BackTraceY = SimulationHeight + 0.5;
 
       InterpolationI0 = (int32)BackTraceX; InterpolationI1 = InterpolationI0 + 1;
       InterpolationJ0 = (int32)BackTraceY; InterpolationJ1 = InterpolationJ0 + 1;
@@ -340,13 +351,39 @@ internal void NSAdvect(real32* AdvectionTarget, real32* TargetPrior){
 }
 
 
-internal void NSProject(){
-  for(int i = 1; i <= GlobalWidth; ++i){
-    for(int j = 1; j <= GlobalHeight; ++j){
+internal void NSProject(real32* Poisson, real32* Divergence){
+  real32 ProjectionConstantX = 1.0f / (real32)SimulationWidth;
+  real32 ProjectionConstantY = 1.0f / (real32)SimulationHeight;
       
+  for(int i = 1; i <= SimulationWidth; ++i){
+    for(int j = 1; j <= SimulationHeight; ++j){
+      Divergence[IX(i,j)] = -0.5 * ProjectionConstantY *
+	(
+	 SimulationGrid.VelocityX[IX(i+1,j)] - SimulationGrid.VelocityX[IX(i-1,j)] +
+	 SimulationGrid.VelocityY[IX(i,j+1)] - SimulationGrid.VelocityY[IX(i,j-1)]
+	 );
+      Poisson[IX(i,j)] = 0;
     }
   }
-  // TODO: set velocity boundary
+  // TODO: set bounds on Divergence, Poisson
+
+  for(int GaussSeidelIterations = 0; GaussSeidelIterations < 20; ++GaussSeidelIterations){
+    for(int i = 1; i <= SimulationWidth; ++i){
+      for(int j = 1; j <= SimulationHeight; ++j){
+	Poisson[IX(i,j)] = (Divergence[IX(i,j)] + Poisson[IX(i-1,j)] +
+			    Poisson[IX(i+1,j)] + Poisson[IX(i,j-1)] + Poisson[IX(i,j+1)]) / 4.0f;
+      }
+    }
+    // TODO: set bound on PriorVelocityX
+  }
+
+  for(int i = 1; i <= SimulationWidth; ++i){
+    for(int j = 1; j <= SimulationHeight; ++j){
+      SimulationGrid.VelocityX[IX(i,j)] -= 0.5 * (Poisson[IX(i+1,j)] - Poisson[IX(i-1,j)]) / ProjectionConstantX;
+      SimulationGrid.VelocityY[IX(i,j)] -= 0.5 * (Poisson[IX(i,j+1)] - Poisson[IX(i,j-1)]) / ProjectionConstantY;
+    }
+  }
+  // TODO: set bounds on VelocityX, VelocityY
   
 }
 
@@ -354,13 +391,13 @@ internal void NSProject(){
 internal void SimulationDriver(){
 
   // 1: Density Operations
-
+  NSUpdate(SimulationGrid.PriorDensity, SimulationGrid.Density);
+  
   NSAddSource(SimulationGrid.PriorDensity, SimulationGrid.DensitySources);
 
   NSDiffuse(SimulationGrid.Density, SimulationGrid.PriorDensity);
 
   NSUpdate(SimulationGrid.PriorDensity, SimulationGrid.Density);
-    
   NSAdvect(SimulationGrid.Density, SimulationGrid.PriorDensity);
 
   // 2: Velocity Operations
@@ -372,11 +409,20 @@ internal void SimulationDriver(){
   
   NSUpdate(SimulationGrid.VelocityY, SimulationGrid.PriorVelocityY);
   NSDiffuse(SimulationGrid.VelocityY, SimulationGrid.PriorVelocityY);
-  
-  
+
+  NSProject(SimulationGrid.PriorVelocityX, SimulationGrid.PriorVelocityY);
+
+  NSUpdate(SimulationGrid.VelocityX, SimulationGrid.PriorVelocityX);
+  NSUpdate(SimulationGrid.VelocityY, SimulationGrid.PriorVelocityY);
+
+  NSAdvect(SimulationGrid.VelocityX, SimulationGrid.PriorVelocityX);
+  NSAdvect(SimulationGrid.VelocityY, SimulationGrid.PriorVelocityY);
+
+  NSProject(SimulationGrid.PriorVelocityX, SimulationGrid.PriorVelocityY);
+ 
   // (3: Overflow Prevention / Cleanup)
-  for(int i = 1; i <= GlobalWidth; ++i){
-    for(int j = 1; j <= GlobalHeight; ++j){
+  for(int i = 1; i <= SimulationWidth; ++i){
+    for(int j = 1; j <= SimulationHeight; ++j){
 
       SimulationGrid.Density[IX(i,j)] = (SimulationGrid.Density[IX(i,j)] > 500) ? 500 : SimulationGrid.Density[IX(i,j)];
 
@@ -384,7 +430,6 @@ internal void SimulationDriver(){
     }
   }
 
-  NSUpdate(SimulationGrid.PriorDensity, SimulationGrid.Density);
   
 }
 
@@ -392,6 +437,7 @@ internal void SimulationDriver(){
 internal void SimulationRender(win32_offscreen_buffer *Buffer, int BlueOffset, int GreenOffset)
 {
 
+  uint32 ScaledX, ScaledY;
   uint8 *Row = (uint8*)Buffer->Memory;
   for(int Y = 0;
       Y < Buffer->Height;
@@ -406,7 +452,9 @@ internal void SimulationRender(win32_offscreen_buffer *Buffer, int BlueOffset, i
 	{
 	  // (pull color from simulation)
 	  // TODO: define function to convert to HSV
-	  real32 PixelDensity = SimulationGrid.Density[IX(X + 1, Y + 1)];
+	  ScaledX = X / GlobalXScale;
+	  ScaledY = Y / GlobalYScale;
+	  real32 PixelDensity = SimulationGrid.Density[IX(ScaledX + 1, ScaledY + 1)];
 	  // (max against 255)
 	  uint8 Blue = (PixelDensity > 255) ? 255 : (uint8)PixelDensity;
 	  // *Pixel++ = ((Green << 8) | Blue); // (pixel bytes are (blank)RGB, 4 bytes)
