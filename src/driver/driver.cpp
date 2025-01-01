@@ -299,8 +299,30 @@ internal void NSAddSource(real32* Destination, real32* Source){
   }
 }
 
+internal void NSBound(int Mode, real32* Array){
+  // Walls
+  for(int i = 1; i <= SimulationWidth; ++i){
+    Array[IX(i, 0)] = Mode == 2 ? -Array[IX(i,1)] : Array[IX(i,1)];
+    Array[IX(i, SimulationHeight + 1)] = Mode == 2 ?
+      -Array[IX(i,SimulationHeight)] : Array[IX(i,SimulationHeight)];
+  }
+  for(int j = 1; j <= SimulationHeight; ++j){
+    Array[IX(0, j)] = Mode == 1 ? -Array[IX(1,j)] : Array[IX(1,j)];
+    Array[IX(SimulationWidth + 1, j)] = Mode == 1 ?
+      -Array[IX(SimulationWidth, j)] : Array[IX(SimulationWidth, j)];
+  }
+  
+  // Corners
+  Array[IX(0,0)] = 0.5f * (Array[IX(0,1)] + Array[IX(1,0)]);
+  Array[IX(0,SimulationHeight+1)] = 0.5f * (Array[IX(0,SimulationHeight)] + Array[IX(1,SimulationHeight+1)]);
+  Array[IX(SimulationWidth+1,0)] = 0.5f * (Array[IX(SimulationWidth,0)] + Array[IX(SimulationWidth+1,1)]);
+  Array[IX(SimulationWidth+1,SimulationHeight+1)] = 0.5f * (Array[IX(SimulationWidth+1,SimulationHeight)] +
+							    Array[IX(SimulationWidth,SimulationHeight+1)]);
+  
+} 
 
-internal void NSDiffuse(real32* DiffusionTarget, real32* TargetPrior){
+
+internal void NSDiffuse(int32 Mode, real32* DiffusionTarget, real32* TargetPrior){
   // Gauss-Seidel Relaxation (20 passes): 
   real32 DiffusionConstant = GlobalDiffusionRate * GlobalBaseDeltaTime;
   
@@ -314,11 +336,14 @@ internal void NSDiffuse(real32* DiffusionTarget, real32* TargetPrior){
 								SimulationGrid.Density[IX(i,j-1)] +
 								SimulationGrid.Density[IX(i,j+1)]
 								))/(1 + 4 * DiffusionConstant);
-      }}}
+      }}
+    
+    NSBound(Mode, DiffusionTarget);
+  }
 }
 
 
-internal void NSAdvect(real32* AdvectionTarget, real32* TargetPrior){
+internal void NSAdvect(int32 Mode, real32* AdvectionTarget, real32* TargetPrior){
   int32 InterpolationI0, InterpolationI1, InterpolationJ0, InterpolationJ1;
   float BackTraceX, BackTraceY, RelativeDeltaTime;
   float BW[4]; // (Bilinear Weights)
@@ -348,6 +373,8 @@ internal void NSAdvect(real32* AdvectionTarget, real32* TargetPrior){
       
     }
   }
+  
+  NSBound(Mode, AdvectionTarget);
 }
 
 
@@ -365,7 +392,8 @@ internal void NSProject(real32* Poisson, real32* Divergence){
       Poisson[IX(i,j)] = 0;
     }
   }
-  // TODO: set bounds on Divergence, Poisson
+  
+  NSBound(0, Divergence); NSBound(0, Poisson);
 
   for(int GaussSeidelIterations = 0; GaussSeidelIterations < 20; ++GaussSeidelIterations){
     for(int i = 1; i <= SimulationWidth; ++i){
@@ -374,7 +402,7 @@ internal void NSProject(real32* Poisson, real32* Divergence){
 			    Poisson[IX(i+1,j)] + Poisson[IX(i,j-1)] + Poisson[IX(i,j+1)]) / 4.0f;
       }
     }
-    // TODO: set bound on PriorVelocityX
+    NSBound(0, Poisson);
   }
 
   for(int i = 1; i <= SimulationWidth; ++i){
@@ -383,7 +411,7 @@ internal void NSProject(real32* Poisson, real32* Divergence){
       SimulationGrid.VelocityY[IX(i,j)] -= 0.5 * (Poisson[IX(i,j+1)] - Poisson[IX(i,j-1)]) / ProjectionConstantY;
     }
   }
-  // TODO: set bounds on VelocityX, VelocityY
+  NSBound(1, SimulationGrid.VelocityX); NSBound(2, SimulationGrid.VelocityY);
   
 }
 
@@ -395,28 +423,28 @@ internal void SimulationDriver(){
   
   NSAddSource(SimulationGrid.PriorDensity, SimulationGrid.DensitySources);
 
-  NSDiffuse(SimulationGrid.Density, SimulationGrid.PriorDensity);
+  NSDiffuse(0, SimulationGrid.Density, SimulationGrid.PriorDensity);
 
   NSUpdate(SimulationGrid.PriorDensity, SimulationGrid.Density);
-  NSAdvect(SimulationGrid.Density, SimulationGrid.PriorDensity);
+  NSAdvect(0, SimulationGrid.Density, SimulationGrid.PriorDensity); NSBound(0, SimulationGrid.Density);
 
   // 2: Velocity Operations
   NSAddSource(SimulationGrid.VelocityX, SimulationGrid.VelocityXSources);
   NSAddSource(SimulationGrid.VelocityY, SimulationGrid.VelocityYSources);
 
   NSUpdate(SimulationGrid.VelocityX, SimulationGrid.PriorVelocityX);
-  NSDiffuse(SimulationGrid.VelocityX, SimulationGrid.PriorVelocityX);
+  NSDiffuse(1, SimulationGrid.VelocityX, SimulationGrid.PriorVelocityX);
   
   NSUpdate(SimulationGrid.VelocityY, SimulationGrid.PriorVelocityY);
-  NSDiffuse(SimulationGrid.VelocityY, SimulationGrid.PriorVelocityY);
+  NSDiffuse(2, SimulationGrid.VelocityY, SimulationGrid.PriorVelocityY);
 
   NSProject(SimulationGrid.PriorVelocityX, SimulationGrid.PriorVelocityY);
 
   NSUpdate(SimulationGrid.VelocityX, SimulationGrid.PriorVelocityX);
   NSUpdate(SimulationGrid.VelocityY, SimulationGrid.PriorVelocityY);
 
-  NSAdvect(SimulationGrid.VelocityX, SimulationGrid.PriorVelocityX);
-  NSAdvect(SimulationGrid.VelocityY, SimulationGrid.PriorVelocityY);
+  NSAdvect(1, SimulationGrid.VelocityX, SimulationGrid.PriorVelocityX); 
+  NSAdvect(2, SimulationGrid.VelocityY, SimulationGrid.PriorVelocityY); 
 
   NSProject(SimulationGrid.PriorVelocityX, SimulationGrid.PriorVelocityY);
  
