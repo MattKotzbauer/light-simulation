@@ -7,6 +7,8 @@
 #include <math.h>
 #include <stdio.h>
 
+#include <windowsx.h>
+
 /*
 Large-scale TODO's:
 
@@ -101,17 +103,24 @@ global_variable real32** SimulationArrays[] = {
   &SimulationGrid.VelocityYSources
 };
 
+// Globals for window management
 global_variable bool GlobalRunning;
-// TODO: convert into pair of single-dimensional arrays for density and velocity
-// TODO: support down-scaled version that treats multiple render pixels as single simulation pixel
-// global_variable NS_Pixel SimulationGrid[GlobalHeight + 2][GlobalWidth + 2];
 global_variable win32_offscreen_buffer GlobalBackBuffer;
 
-// globals for sound loading
+// Globals for sound loading
 global_variable IAudioClient* pAudioClientGlobal;
 global_variable IAudioRenderClient* pRenderClientGlobal;
 global_variable UINT32 bufferFrameCountGlobal;
 global_variable real32 sampleRateGlobal;
+
+// Globals for input management
+global_variable bool GlobalMouseDown = false;
+// TODO: scope lexically once we better understand where we use these
+global_variable int32 PriorMouseX = 0;
+global_variable int32 PriorMouseY = 0;
+global_variable int32 GlobalMouseX = 0;
+global_variable int32 GlobalMouseY = 0;
+
 
 // XInputGetState Support
 // Type declaration for 'name'
@@ -462,8 +471,25 @@ internal void SimulationDriver(){
 }
 
 /* Render animated pixel content into Buffer */
-internal void SimulationRender(win32_offscreen_buffer *Buffer, int BlueOffset, int GreenOffset)
+internal void SimulationRender(win32_offscreen_buffer *Buffer)
 {
+  // (Assuming that Buffer->Width, Buffer->Height hold current window width / height) 
+
+  // Scaling for (320 x 180) Simulation Dimensions 
+  // WindowScale = min(Buffer->Width / SimulationWidth, Buffer->Height / SimulationHeight)
+  int32 WindowScale = (Buffer->Width / SimulationWidth) < (Buffer->Height / SimulationHeight) ? 
+    Buffer->Width / SimulationWidth : Buffer->Height / SimulationHeight;
+
+  // Total pixels occupied by simulation
+  int32 ScaledWidth =  WindowScale * SimulationWidth, ScaledHeight = WindowScale * SimulationHeight;
+
+  // Offsets for simulation window within client window
+  // OffsetX = max(0.5f * (Buffer->Width - ScaledWidth), 0)
+  int32 OffsetX = Buffer->Width > ScaledWidth ?
+    0.5f * (Buffer->Width - ScaledWidth) : 0;
+  int32 OffsetY = Buffer->Height > ScaledHeight ?
+    0.5f * (Buffer->Height - ScaledHeight) : 0;
+  
 
   uint32 ScaledX, ScaledY;
   uint8 *Row = (uint8*)Buffer->Memory;
@@ -478,19 +504,29 @@ internal void SimulationRender(win32_offscreen_buffer *Buffer, int BlueOffset, i
 	  ++X
 	  )
 	{
-	  // (pull color from simulation)
-	  // TODO: define function to convert to HSV
-	  ScaledX = X / GlobalXScale;
-	  ScaledY = Y / GlobalYScale;
-	  real32 PixelDensity = SimulationGrid.Density[IX(ScaledX + 1, ScaledY + 1)];
-	  // (max against 255)
-	  uint8 Blue = (PixelDensity > 255) ? 255 : (uint8)PixelDensity;
-	  // *Pixel++ = ((Green << 8) | Blue); // (pixel bytes are (blank)RGB, 4 bytes)
-	  *Pixel++ = ((Blue << 16) | (Blue << 8) | Blue);
+	  if(Y < OffsetY || Y > (Buffer->Height - OffsetY) || X < OffsetX || (X > Buffer->Width - OffsetX))
+	    {
+	      *Pixel++ = ((255 << 16) | (255 << 8) | 255);
+		// Render black
+	    }
+	  else
+	    {
+	      ScaledX = (X - OffsetX) / WindowScale;
+	      ScaledY = (Y - OffsetY) / WindowScale;
+	      // Render color (+1 since we reserve 0 index for )
+	      real32 PixelDensity = SimulationGrid.Density[IX(ScaledX + 1, ScaledY + 1)];
+	      // (Max against 255)
+	      uint8 Blue = (PixelDensity > 255) ? 255 : (uint8)PixelDensity;
+	      // *Pixel++ = ((Green << 8) | Blue); // (pixel bytes are (blank)RGB, 4 bytes)
+	      *Pixel++ = ((Blue << 16) | (Blue << 8) | Blue);
+	    }
+	  
+
 	}
 
       Row += Buffer->Pitch;
     }
+  
 }
 
 
@@ -517,7 +553,6 @@ internal void Win64ResizeDIBSection(win32_offscreen_buffer* Buffer, int Width, i
   int BitmapMemorySize = (Width * Height) * Buffer->BytesPerPixel;
   Buffer->Memory = VirtualAlloc(0, BitmapMemorySize, MEM_COMMIT, PAGE_READWRITE);
 
-  // TODO: probably clear this to black
   Buffer->Pitch = Buffer->BytesPerPixel * Width;
   
 }
@@ -525,12 +560,24 @@ internal void Win64ResizeDIBSection(win32_offscreen_buffer* Buffer, int Width, i
 internal void Win64DisplayBufferInWindow(HDC DeviceContext, int WindowWidth, int WindowHeight, win32_offscreen_buffer *Buffer)
 {
   // TODO: aspect ratio correction
+  // (WindowWidth, WindowHeight taken from GetWindowDimension())
+  // (Buffer->Width, Buffer->Height currently fixed to GlobalWidth, GlobalHeight)
+
+  /* 
+  Buffer->Width = WindowWidth;
+  Buffer->Height = WindowHeight;
+  */
+
+
+  // At this point, WindowWidth and WindowHeight should be = to Buffer->Width, Buffer->Height
   StretchDIBits(DeviceContext,
 		0, 0, WindowWidth, WindowHeight,
 		0, 0, Buffer->Width, Buffer->Height,
 		Buffer->Memory,
 		&Buffer->Info,
 		DIB_RGB_COLORS, SRCCOPY);
+
+  
 }
 
 
@@ -546,6 +593,8 @@ LRESULT Win64MainWindowCallback(
   switch(Message){
   case WM_SIZE: 
   {
+    win32_window_dimension Dimension = GetWindowDimension(Window);
+    Win64ResizeDIBSection(&GlobalBackBuffer, Dimension.Width, Dimension.Height);
   } break;
 
   case WM_CLOSE:
@@ -619,6 +668,29 @@ LRESULT Win64MainWindowCallback(
     EndPaint(Window, &Paint); // (returns bool)
  
   } break;
+  case WM_LBUTTONDOWN:
+  {  } break;
+  case WM_LBUTTONUP:
+  {  } break;
+  case WM_MOUSEMOVE:
+  {
+    if(WParam & MK_LBUTTON){ GlobalMouseDown = true; }
+    else{ GlobalMouseDown = false; }
+    
+    PriorMouseX = GlobalMouseX; PriorMouseY = GlobalMouseY;
+    GlobalMouseX = GET_X_LPARAM(LParam);
+    GlobalMouseY = GET_Y_LPARAM(LParam);
+
+    
+    char MouseBuffer[256];
+    sprintf(MouseBuffer, "Mouse: Current(X=%d, Y=%d) Prior(X=%d, Y=%d) Button:%s\n", 
+            GlobalMouseX, GlobalMouseY, 
+            PriorMouseX, PriorMouseY,
+            GlobalMouseDown ? "DOWN" : "UP");
+    OutputDebugStringA(MouseBuffer);
+    
+  } break;
+    
 
   default:
   {
@@ -720,7 +792,7 @@ int WINAPI WinMain(HINSTANCE Instance,
 
 	    // Render Visual Buffer
 	    SimulationDriver();
-	    SimulationRender(&GlobalBackBuffer, GlobalXOffset, GlobalYOffset);
+	    SimulationRender(&GlobalBackBuffer);
 
 	    win32_window_dimension Dimension = GetWindowDimension(Window);
 	    Win64DisplayBufferInWindow(DeviceContext, Dimension.Width, Dimension.Height, &GlobalBackBuffer);
@@ -738,11 +810,13 @@ int WINAPI WinMain(HINSTANCE Instance,
 	    real32 MSPerFrame = ((real32)(1000.0f * (real32)CounterElapsed) / (real32)PerfCountFrequency);
 	    real32 FPS = (real32)PerfCountFrequency / (real32)CounterElapsed;
 	    real32 MCPF = (real32)CyclesElapsed / (1000.0f * 1000.0f);
-	    
+
+	    /* 
 	    char Buffer[256];
 	    sprintf(Buffer, "ms / frame: %.02fms --- FPS: %.02ffps --- m-cycles / frame: %.02f\n", MSPerFrame, FPS, MCPF);
 	    OutputDebugStringA(Buffer);
-
+	    */
+	    
 	    // GlobalXOffset += 1;
 	    // GlobalYOffset -= 1;
 	    
