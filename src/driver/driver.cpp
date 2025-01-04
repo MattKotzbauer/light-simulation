@@ -62,16 +62,11 @@ struct win32_offscreen_buffer
 global_variable real32 GlobalDiffusionRate = 1.0f;
 global_variable real32 GlobalBaseDeltaTime = 1.0f;
 
-// TODO: make these configurable
-const int32 GlobalHeight = 720;
-const int32 GlobalWidth = 1280;
 // const int32 SimulationHeight = 720;
 // const int32 SimulationWidth = 1280;
 const int32 SimulationHeight = 180;
 const int32 SimulationWidth = 320;
 
-const int32 GlobalXScale = GlobalWidth / SimulationWidth;
-const int32 GlobalYScale = GlobalHeight / SimulationHeight;
 
 // TODO: (when using, bound queries to be within the GlobalWidth, GlobalHeight bounds)
 #define IX(i,j) (i+(SimulationWidth+2)*(j))
@@ -106,6 +101,7 @@ global_variable real32** SimulationArrays[] = {
 // Globals for window management
 global_variable bool GlobalRunning;
 global_variable win32_offscreen_buffer GlobalBackBuffer;
+global_variable WINDOWPLACEMENT g_wpPrev = { sizeof(g_wpPrev) };
 
 // Globals for sound loading
 global_variable IAudioClient* pAudioClientGlobal;
@@ -489,8 +485,13 @@ internal void SimulationRender(win32_offscreen_buffer *Buffer)
     0.5f * (Buffer->Width - ScaledWidth) : 0;
   int32 OffsetY = Buffer->Height > ScaledHeight ?
     0.5f * (Buffer->Height - ScaledHeight) : 0;
-  
 
+  /* 
+  char DebugBuffer[256];
+  sprintf(DebugBuffer, "XOffset: %d, YOffset: %d\n", OffsetX, OffsetY);
+  OutputDebugStringA(DebugBuffer);
+  */
+  
   uint32 ScaledX, ScaledY;
   uint8 *Row = (uint8*)Buffer->Memory;
   for(int Y = 0;
@@ -656,6 +657,40 @@ LRESULT Win64MainWindowCallback(
     case VK_F4: {
       if ((LParam & (1 << 29)) != 0){ GlobalRunning = false; }
     } break;
+    case VK_F11: {
+
+      if(IsDown && !WasDown){
+      
+      DWORD dwStyle = GetWindowLong(Window, GWL_STYLE);
+      if(dwStyle & WS_OVERLAPPEDWINDOW){
+	
+        MONITORINFO mi = {sizeof(mi)};
+
+	// Try to (1) save current window placement in g_wpPrev, and (2) get monitor info for monitor containing window
+	if(GetWindowPlacement(Window, &g_wpPrev) &&
+	   GetMonitorInfo(MonitorFromWindow(Window, MONITOR_DEFAULTTOPRIMARY), &mi)){
+
+	  // Remove overlapped window style
+	  SetWindowLong(Window, GWL_STYLE, dwStyle & ~WS_OVERLAPPEDWINDOW);
+
+	  // Set window to span entire monitor
+	  SetWindowPos(Window, HWND_TOP,
+		       mi.rcMonitor.left, mi.rcMonitor.top,
+		       mi.rcMonitor.right - mi.rcMonitor.left,
+		       mi.rcMonitor.bottom - mi.rcMonitor.top,
+		       SWP_NOOWNERZORDER | SWP_FRAMECHANGED
+		       );
+	  }
+      }
+      else{
+	SetWindowLong(Window, GWL_STYLE, dwStyle | WS_OVERLAPPEDWINDOW);
+	SetWindowPlacement(Window, &g_wpPrev);
+	SetWindowPos(Window, NULL, 0, 0, 0, 0,
+		     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER  | SWP_FRAMECHANGED);
+      }
+      // OutputDebugStringA("foo");
+    } 
+    } break;
     }
   } break;
 
@@ -670,10 +705,10 @@ LRESULT Win64MainWindowCallback(
     EndPaint(Window, &Paint); // (returns bool)
  
   } break;
-  case WM_LBUTTONDOWN:
-  {  } break;
-  case WM_LBUTTONUP:
-  {  } break;
+  case WM_NCLBUTTONDBLCLK:
+  {
+    SendMessage(Window, WM_KEYDOWN, VK_F11, 0);
+  } break;
   case WM_MOUSEMOVE:
   {
     if(WParam & MK_LBUTTON){ GlobalMouseDown = true; }
@@ -693,7 +728,7 @@ LRESULT Win64MainWindowCallback(
     */
     
   } break;
-    
+   
 
   default:
   {
@@ -719,7 +754,7 @@ int WINAPI WinMain(HINSTANCE Instance,
   
   WNDCLASSA WindowClass = {};
 
-  Win64ResizeDIBSection(&GlobalBackBuffer, GlobalWidth, GlobalHeight);
+  Win64ResizeDIBSection(&GlobalBackBuffer, 1280, 720);
 
   NSSimulationInit();
   
