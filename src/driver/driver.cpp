@@ -504,20 +504,22 @@ internal void SimulationRender(win32_offscreen_buffer *Buffer)
 	  ++X
 	  )
 	{
-	  if(Y < OffsetY || Y > (Buffer->Height - OffsetY) || X < OffsetX || (X > Buffer->Width - OffsetX))
+	  if(Y < OffsetY || Y >= OffsetY + ScaledHeight || X < OffsetX || X >= OffsetX + ScaledWidth)
 	    {
+	      // (Render white)
 	      *Pixel++ = ((255 << 16) | (255 << 8) | 255);
-		// Render black
 	    }
 	  else
 	    {
+	      // (Render color)
 	      ScaledX = (X - OffsetX) / WindowScale;
 	      ScaledY = (Y - OffsetY) / WindowScale;
-	      // Render color (+1 since we reserve 0 index for )
+	      // Render color (+1 since we reserve 0 index for boundaries)
 	      real32 PixelDensity = SimulationGrid.Density[IX(ScaledX + 1, ScaledY + 1)];
 	      // (Max against 255)
 	      uint8 Blue = (PixelDensity > 255) ? 255 : (uint8)PixelDensity;
 	      // *Pixel++ = ((Green << 8) | Blue); // (pixel bytes are (blank)RGB, 4 bytes)
+	      // (Greyscale)
 	      *Pixel++ = ((Blue << 16) | (Blue << 8) | Blue);
 	    }
 	  
@@ -681,13 +683,14 @@ LRESULT Win64MainWindowCallback(
     GlobalMouseX = GET_X_LPARAM(LParam);
     GlobalMouseY = GET_Y_LPARAM(LParam);
 
-    
+    /* 
     char MouseBuffer[256];
     sprintf(MouseBuffer, "Mouse: Current(X=%d, Y=%d) Prior(X=%d, Y=%d) Button:%s\n", 
             GlobalMouseX, GlobalMouseY, 
             PriorMouseX, PriorMouseY,
             GlobalMouseDown ? "DOWN" : "UP");
     OutputDebugStringA(MouseBuffer);
+    */
     
   } break;
     
