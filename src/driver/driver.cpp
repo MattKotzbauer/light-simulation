@@ -109,15 +109,16 @@ global_variable IAudioRenderClient* pRenderClientGlobal;
 global_variable UINT32 bufferFrameCountGlobal;
 global_variable real32 sampleRateGlobal;
 
-// Globals for input management
-global_variable bool GlobalMouseDown = false;
-// TODO: scope lexically once we better understand where we use these
-global_variable int32 PriorMouseX = 0;
-global_variable int32 PriorMouseY = 0;
-global_variable int32 GlobalMouseX = 0;
-global_variable int32 GlobalMouseY = 0;
+struct MouseState{
+  bool IsDown = false;
+  int32 X;
+  int32 Y;
+  int32 PriorX;
+  int32 PriorY;
+};
 
-
+global_variable MouseState GlobalMouse = {};
+  
 // XInputGetState Support
 // Type declaration for 'name'
 #define X_INPUT_GET_STATE(name) DWORD WINAPI name(DWORD dwUserIndex, XINPUT_STATE* pState)
@@ -276,6 +277,7 @@ internal void NSSimulationInit(){
     }
   }
 
+  /*
   // TEMPORARY: manual allocation of density / velocity
   // SimulationGrid[300][300].SourceValue = 3;
   for(int i = 50; i < 100; ++i){ for(int j = 50; j < 100; ++j){
@@ -284,6 +286,7 @@ internal void NSSimulationInit(){
       if(i > 75){SimulationGrid.DensitySources[IX(i,j)] = 0;
 	}
     }}
+  */
 }
 
 
@@ -470,7 +473,6 @@ internal void SimulationDriver(){
 internal void SimulationRender(win32_offscreen_buffer *Buffer)
 {
   // (Assuming that Buffer->Width, Buffer->Height hold current window width / height) 
-
   // Scaling for (320 x 180) Simulation Dimensions 
   // WindowScale = min(Buffer->Width / SimulationWidth, Buffer->Height / SimulationHeight)
   int32 WindowScale = (Buffer->Width / SimulationWidth) < (Buffer->Height / SimulationHeight) ? 
@@ -482,15 +484,15 @@ internal void SimulationRender(win32_offscreen_buffer *Buffer)
   // Offsets for simulation window within client window
   // OffsetX = max(0.5f * (Buffer->Width - ScaledWidth), 0)
   int32 OffsetX = Buffer->Width > ScaledWidth ?
-    0.5f * (Buffer->Width - ScaledWidth) : 0;
+    (Buffer->Width - ScaledWidth) / 2 : 0;
   int32 OffsetY = Buffer->Height > ScaledHeight ?
-    0.5f * (Buffer->Height - ScaledHeight) : 0;
+    (Buffer->Height - ScaledHeight) / 2 : 0;
 
-  /* 
+   
   char DebugBuffer[256];
-  sprintf(DebugBuffer, "XOffset: %d, YOffset: %d\n", OffsetX, OffsetY);
+  sprintf(DebugBuffer, "XOffset: %d, YOffset: %d, Buffer Width: %d, Buffer Height: %d\n", OffsetX, OffsetY, Buffer->Width, Buffer->Height);
   OutputDebugStringA(DebugBuffer);
-  */
+
   
   uint32 ScaledX, ScaledY;
   uint8 *Row = (uint8*)Buffer->Memory;
@@ -532,6 +534,43 @@ internal void SimulationRender(win32_offscreen_buffer *Buffer)
   
 }
 
+internal void WindowToSimulationCoords(int32 WindowX, int32 WindowY, int32 WindowWidth, int32 WindowHeight, int32* SimX, int32* SimY){
+
+  // WindowScale = min(WindowWidth / SimulationWidth, WindowHeight / SimulationHeight)
+  int32 WindowScale = (WindowWidth / SimulationWidth) < (WindowHeight / SimulationHeight) ?
+    WindowWidth / SimulationWidth : WindowHeight / SimulationHeight;
+
+  // (Pixel width and height of simulation display)
+  int32 ScaledWidth = WindowScale * SimulationWidth;
+  int32 ScaledHeight = WindowScale * SimulationHeight;
+
+  int32 OffsetX = WindowWidth > ScaledWidth ? (WindowWidth - ScaledWidth) / 2 : 0;
+  int32 OffsetY = WindowHeight > ScaledHeight ? (WindowHeight - ScaledHeight) / 2 : 0;
+
+  *SimX = ((WindowX - OffsetX) / WindowScale) + 1;
+  *SimY = ((WindowY - OffsetY) / WindowScale) + 1;
+
+  *SimX = (*SimX < 1) ? 1 : ((*SimX > SimulationWidth) ? SimulationWidth : *SimX);
+  *SimY = (*SimY < 1) ? 1 : ((*SimY > SimulationHeight) ? SimulationHeight : *SimY);
+  
+}
+
+
+internal void HandleMouseInput(win32_window_dimension Dimension){
+  // (is there a better way to pass in the current dimension)
+  if(GlobalMouse.IsDown &&
+     GlobalMouse.X >= 0 && GlobalMouse.X < Dimension.Width &&
+     GlobalMouse.Y >= 0 && GlobalMouse.Y < Dimension.Height){
+    int32 SimX, SimY;
+    WindowToSimulationCoords(GlobalMouse.X, GlobalMouse.Y, Dimension.Width, Dimension.Height, &SimX, &SimY);
+    // (Starting with 1-pixel density)
+    SimulationGrid.DensitySources[IX(SimX, SimY)] = 100.0f;
+    if(GlobalMouse.X != GlobalMouse.PriorX || GlobalMouse.Y != GlobalMouse.PriorY){
+      // (Handle velocity computing)
+    }
+    
+  }
+}
 
 
 internal void Win64ResizeDIBSection(win32_offscreen_buffer* Buffer, int Width, int Height)
@@ -711,12 +750,13 @@ LRESULT Win64MainWindowCallback(
   } break;
   case WM_MOUSEMOVE:
   {
-    if(WParam & MK_LBUTTON){ GlobalMouseDown = true; }
-    else{ GlobalMouseDown = false; }
+    // Handle mouse movement
+    if(WParam & MK_LBUTTON){ GlobalMouse.IsDown = true; }
+    else{ GlobalMouse.IsDown = false; }
     
-    PriorMouseX = GlobalMouseX; PriorMouseY = GlobalMouseY;
-    GlobalMouseX = GET_X_LPARAM(LParam);
-    GlobalMouseY = GET_Y_LPARAM(LParam);
+    GlobalMouse.PriorX = GlobalMouse.X; GlobalMouse.PriorY = GlobalMouse.Y;
+    GlobalMouse.X = GET_X_LPARAM(LParam);
+    GlobalMouse.Y = GET_Y_LPARAM(LParam);
 
     /* 
     char MouseBuffer[256];
@@ -728,7 +768,6 @@ LRESULT Win64MainWindowCallback(
     */
     
   } break;
-   
 
   default:
   {
@@ -834,7 +873,9 @@ int WINAPI WinMain(HINSTANCE Instance,
 
 	    win32_window_dimension Dimension = GetWindowDimension(Window);
 	    Win64DisplayBufferInWindow(DeviceContext, Dimension.Width, Dimension.Height, &GlobalBackBuffer);
-	 
+
+	    HandleMouseInput(Dimension);
+	    
 	    // Time Tracking (QueryPerformanceCounter, rdtsc): 
 	    int64 EndCycleCount = __rdtsc();
 	    LARGE_INTEGER EndCounter;
