@@ -2,7 +2,7 @@
 ***Navier-Stokes Based Light Simulation***
 
 
-Often in games, we treat light as having infinite speed, displaying the end result of our comnputations with it instantly. In this repo, I use a Navier-Stokes simulation to explore the opposite: declaring light as an object the user can create, and visualizing how its shape changes over time if we treat it as a very high-density, low-velocity fluid.
+Often in games, we treat light as having infinite speed, displaying the end result of our comnputations with it instantly. In this repo, I use a Navier-Stokes simulation to explore the opposite: declaring light as an object the user can create, and visualizing how its shape changes over time if we treat it as a high-density, high-velocity fluid.
 
 
 ![Image from Simulation](src/misc/Example1.png)
