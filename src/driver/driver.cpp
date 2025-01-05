@@ -1,29 +1,15 @@
 #include <windows.h>
+#include <windowsx.h>
 #include <stdint.h>
-#include <xinput.h>
-#include <mmdeviceapi.h>
-#include <audioclient.h>
-#include <initguid.h>
 #include <math.h>
 #include <stdio.h>
 
-#include <windowsx.h>
 
 /*
-Large-scale TODO's:
-
-
-* move simulation functions to a helper file that we then import
-* HSV conversion (have colors correspond to varying values of dark blue as start)
-* change SimulationDriver() call to have pointer to simulation grid as parameter, then also pass into SimulationRender(), then we can remove globals
-* (control saturation through pixel guy)
-
-* (play around and see if there's an easier way to instantiate arrays / allocate memory: could have pointer be to malloc call of size (sizeof(real32) *  (GlobalHeight + 2) * (GlobalWidth + 2)), which could be allocated within SimulationInit, though may want to use some type of static marker to ensure they're stored in data segment rather than on stack, since may stack overflow)
-
-(* clean up imported libraries: math.h, stdio.h may not be necessary, as well as xinput, etc dependeing on how we're processing input)
+Overall Todos:
+* Move simulation functions into platform-independent header / cpp files
   
  */
-
 
 #define internal static 
 #define local_persist static
@@ -43,11 +29,6 @@ typedef int32_t bool32;
 typedef float real32;
 typedef double real64;
 
-const IID IID_IAudioClient = __uuidof(IAudioClient);
-const IID IID_IAudioRenderClient = __uuidof(IAudioRenderClient);
-
-int32 GlobalXOffset;
-int32 GlobalYOffset;
 
 struct win32_offscreen_buffer
 {
@@ -62,13 +43,10 @@ struct win32_offscreen_buffer
 global_variable real32 GlobalDiffusionRate = 1.0f;
 global_variable real32 GlobalBaseDeltaTime = 1.0f;
 
-// const int32 SimulationHeight = 720;
-// const int32 SimulationWidth = 1280;
 const int32 SimulationHeight = 180;
 const int32 SimulationWidth = 320;
 
-
-// TODO: (when using, bound queries to be within the GlobalWidth, GlobalHeight bounds)
+// (Macro for accessing simulation indices)
 #define IX(i,j) (i+(SimulationWidth+2)*(j))
 
 struct SimulationData{
@@ -103,12 +81,6 @@ global_variable bool GlobalRunning;
 global_variable win32_offscreen_buffer GlobalBackBuffer;
 global_variable WINDOWPLACEMENT g_wpPrev = { sizeof(g_wpPrev) };
 
-// Globals for sound loading
-global_variable IAudioClient* pAudioClientGlobal;
-global_variable IAudioRenderClient* pRenderClientGlobal;
-global_variable UINT32 bufferFrameCountGlobal;
-global_variable real32 sampleRateGlobal;
-
 struct MouseState{
   bool IsDown = false;
   int32 X;
@@ -119,130 +91,6 @@ struct MouseState{
 
 global_variable MouseState GlobalMouse = {};
   
-// XInputGetState Support
-// Type declaration for 'name'
-#define X_INPUT_GET_STATE(name) DWORD WINAPI name(DWORD dwUserIndex, XINPUT_STATE* pState)
-// typedef DWORD WINAPI x_input_get_state(DWORD dwUserIndex, XINPUT_STATE* pState)
-typedef X_INPUT_GET_STATE(x_input_get_state);
-// DWORD WINAPI XInputGetStateStub(DWORD dwUserIndex, XINPUT_STATE* pState){}
-X_INPUT_GET_STATE(XInputGetStateStub){ return ERROR_DEVICE_NOT_CONNECTED; }
-global_variable x_input_get_state *XInputGetState_ = XInputGetStateStub;
-// (overwrite XInput declaration)
-#define XInputGetState XInputGetState_
-
-// XInputSetState
-#define X_INPUT_SET_STATE(name) DWORD WINAPI name(DWORD dwUserIndex, XINPUT_VIBRATION* pVibration)
-typedef X_INPUT_SET_STATE(x_input_set_state);
-X_INPUT_SET_STATE(XInputSetStateStub){ return ERROR_DEVICE_NOT_CONNECTED; }
-global_variable x_input_set_state *XInputSetState_ = XInputSetStateStub;
-#define XInputSetState XInputSetState_
-
-
-internal void Win32LoadXInput(void){
-  // TODO (
-  HMODULE XInputLibrary = LoadLibraryA("xinput1_4.dll");
-  if (XInputLibrary == NULL){
-    // TODO: diagnostic
-    XInputLibrary = LoadLibraryA("xinput1_3.dll");
-  }
-  if(XInputLibrary){
-    // (void* is default return type of GetProcAddress)
-    XInputGetState = (x_input_get_state*)GetProcAddress(XInputLibrary, "XInputGetState");
-    XInputSetState = (x_input_set_state*)GetProcAddress(XInputLibrary, "XInputSetState");
-  }
-  else{
-    // TODO: diagnostic
-  }
-}
-
-internal void Win64InitWASAPI(HWND Window){
-
-  // https://learn.microsoft.com/en-us/windows/win32/coreaudio/wasapi
-  HRESULT hr;
-
-  // 1: Initialize COM
-  hr = CoInitializeEx(
-			 NULL,
-			 COINIT_MULTITHREADED
-			 );
-  if FAILED(hr){ return;}
-
-  // 2: Create IMMDeviceEnumerator
-  IMMDeviceEnumerator* pEnumerator = NULL;
-  hr = CoCreateInstance(
-			__uuidof(MMDeviceEnumerator),
-			NULL,
-			CLSCTX_ALL,
-			IID_PPV_ARGS(&pEnumerator)
-			);
-  if FAILED(hr){ return; }
-  
-  // 3: Get default audio endpoint
-  IMMDevice* pDevice = NULL;
-  hr = pEnumerator->GetDefaultAudioEndpoint(
-					    eRender,
-					    eConsole,
-					    &pDevice
-					    );
-  if(FAILED(hr)){ return; }
-
-  // 4: Activate IAudioClient
-  //IAudioClient *pAudioClient = NULL;
-  pAudioClientGlobal = NULL;
-  hr = pDevice->Activate(
-			 IID_IAudioClient,
-			 CLSCTX_ALL,
-			 NULL,
-			 (void**)&pAudioClientGlobal
-			 );
-  if (FAILED(hr)){
-    OutputDebugStringA("Activate IAudioClient failed.\n"); return; }
-  
-  // 5: Get mix format
-  WAVEFORMATEX *pwfx = NULL;
-  hr = pAudioClientGlobal->GetMixFormat(&pwfx);
-  if (FAILED(hr)) { return; }
-  
-  // 6: Initialize audio format
-  hr = pAudioClientGlobal->Initialize(
-				AUDCLNT_SHAREMODE_SHARED,
-				0,
-				10000000,
-				0,
-				pwfx,
-				NULL
-				);
-  if (FAILED(hr)) { return; }
-      
-  // 7: get size of allocated buffer
-  //  UINT32 bufferFrameCount;
-  
-  hr = pAudioClientGlobal->GetBufferSize(&bufferFrameCountGlobal);
-  if (FAILED(hr)) { return; }
-  
-  // 8: 
-  //IAudioRenderClient* pRenderClient = NULL;
-  pRenderClientGlobal = NULL;
-  hr = pAudioClientGlobal->GetService(
-				IID_IAudioRenderClient,
-				(void**)&pRenderClientGlobal
-				);
-  if (FAILED(hr)) { return; }
-  
-  // 9: start audio client
-  hr = pAudioClientGlobal->Start();
-  if (FAILED(hr)) { return; }
-
-  // (Check pwfx format)
-  bool isFormatFloat = (pwfx->wFormatTag == WAVE_FORMAT_EXTENSIBLE) ||
-                   (pwfx->wFormatTag == WAVE_FORMAT_IEEE_FLOAT);
-  if(!isFormatFloat) { return; }
-
-  sampleRateGlobal = pwfx->nSamplesPerSec;
-
-  
-}
-
 struct win32_window_dimension{
   int Width;
   int Height;
@@ -259,7 +107,6 @@ internal win32_window_dimension GetWindowDimension(HWND Window){
   return Result;
 }
 
-/* Initialize contents of SimulationGrid on first frame */
 internal void NSSimulationInit(){
   int32 ArrayCount = sizeof(SimulationArrays) / sizeof(SimulationArrays[0]);
   int32 ArraySize = sizeof(real32) * (SimulationWidth + 2) * (SimulationHeight + 2);
@@ -268,7 +115,7 @@ internal void NSSimulationInit(){
     *SimulationArrays[ArrayIndex] = (real32*)VirtualAlloc(0, ArraySize, MEM_COMMIT, PAGE_READWRITE);
   }
   
-  // (we'll initialize to 0 for now)
+  // (Initializing members to 0)
   for(int ArrayIndex = 0; ArrayIndex < ArrayCount; ++ArrayIndex){
     for(int i = 0; i <= SimulationWidth + 1; ++i){
       for(int j = 0; j <= SimulationHeight + 1; ++j){
@@ -276,30 +123,18 @@ internal void NSSimulationInit(){
       }      
     }
   }
-
-  /*
-  // TEMPORARY: manual allocation of density / velocity
-  // SimulationGrid[300][300].SourceValue = 3;
-  for(int i = 50; i < 100; ++i){ for(int j = 50; j < 100; ++j){
-      SimulationGrid.DensitySources[IX(i,j)] = 10;
-      SimulationGrid.VelocityXSources[IX(i,j)] = 5;
-      if(i > 75){SimulationGrid.DensitySources[IX(i,j)] = 0;
-	}
-    }}
-  */
 }
 
 
+// Update priors to hold current values
 internal void NSUpdate(real32* &PriorValues, real32* &CurrentValues){
   real32* SwapPointer = PriorValues;
   PriorValues = CurrentValues;
-  CurrentValues = SwapPointer;
-  
+  CurrentValues = SwapPointer; 
 }
   
-
+// Sourcing step: add source to desired array
 internal void NSAddSource(real32* Destination, real32* Source){
-  // (Sourcing Step)
   for(int i = 1; i <= SimulationWidth; ++i){
     for(int j = 1; j <= SimulationHeight; ++j){
       Destination[IX(i,j)] += Source[IX(i,j)] * GlobalBaseDeltaTime;
@@ -307,8 +142,9 @@ internal void NSAddSource(real32* Destination, real32* Source){
   }
 }
 
+// Bounding step: account for walls and corners
 internal void NSBound(int Mode, real32* Array){
-  // Walls
+  // Walls:
   for(int i = 1; i <= SimulationWidth; ++i){
     Array[IX(i, 0)] = Mode == 2 ? -Array[IX(i,1)] : Array[IX(i,1)];
     Array[IX(i, SimulationHeight + 1)] = Mode == 2 ?
@@ -320,7 +156,7 @@ internal void NSBound(int Mode, real32* Array){
       -Array[IX(SimulationWidth, j)] : Array[IX(SimulationWidth, j)];
   }
   
-  // Corners
+  // Corners:
   Array[IX(0,0)] = 0.5f * (Array[IX(0,1)] + Array[IX(1,0)]);
   Array[IX(0,SimulationHeight+1)] = 0.5f * (Array[IX(0,SimulationHeight)] + Array[IX(1,SimulationHeight+1)]);
   Array[IX(SimulationWidth+1,0)] = 0.5f * (Array[IX(SimulationWidth,0)] + Array[IX(SimulationWidth+1,1)]);
@@ -330,6 +166,7 @@ internal void NSBound(int Mode, real32* Array){
 } 
 
 
+// Diffusion step: simulating diffusion of density / velocity 
 internal void NSDiffuse(int32 Mode, real32* DiffusionTarget, real32* TargetPrior){
   // Gauss-Seidel Relaxation (20 passes): 
   real32 DiffusionConstant = GlobalDiffusionRate * GlobalBaseDeltaTime;
@@ -350,7 +187,7 @@ internal void NSDiffuse(int32 Mode, real32* DiffusionTarget, real32* TargetPrior
   }
 }
 
-
+// Advection step: follow defined velocities
 internal void NSAdvect(int32 Mode, real32* AdvectionTarget, real32* TargetPrior){
   int32 InterpolationI0, InterpolationI1, InterpolationJ0, InterpolationJ1;
   float BackTraceX, BackTraceY, RelativeDeltaTime;
@@ -385,7 +222,7 @@ internal void NSAdvect(int32 Mode, real32* AdvectionTarget, real32* TargetPrior)
   NSBound(Mode, AdvectionTarget);
 }
 
-
+// Projection step (for velocity):
 internal void NSProject(real32* Poisson, real32* Divergence){
   real32 ProjectionConstantX = 1.0f / (real32)SimulationWidth;
   real32 ProjectionConstantY = 1.0f / (real32)SimulationHeight;
@@ -463,17 +300,16 @@ internal void SimulationDriver(){
       SimulationGrid.Density[IX(i,j)] = (SimulationGrid.Density[IX(i,j)] > 500) ? 500 : SimulationGrid.Density[IX(i,j)];
 
       SimulationGrid.PriorDensity[IX(i,j)] = (SimulationGrid.PriorDensity[IX(i,j)] > 500) ? 500 : SimulationGrid.PriorDensity[IX(i,j)];
+      
     }
   }
 
   
 }
 
-/* Render animated pixel content into Buffer */
-internal void SimulationRender(win32_offscreen_buffer *Buffer)
+// Draw simulation content into visual buffer
+internal void DisplaySimulation(win32_offscreen_buffer *Buffer)
 {
-  // (Assuming that Buffer->Width, Buffer->Height hold current window width / height) 
-  // Scaling for (320 x 180) Simulation Dimensions 
   // WindowScale = min(Buffer->Width / SimulationWidth, Buffer->Height / SimulationHeight)
   int32 WindowScale = (Buffer->Width / SimulationWidth) < (Buffer->Height / SimulationHeight) ? 
     Buffer->Width / SimulationWidth : Buffer->Height / SimulationHeight;
@@ -481,19 +317,13 @@ internal void SimulationRender(win32_offscreen_buffer *Buffer)
   // Total pixels occupied by simulation
   int32 ScaledWidth =  WindowScale * SimulationWidth, ScaledHeight = WindowScale * SimulationHeight;
 
-  // Offsets for simulation window within client window
+  // Offsets for simulation window within client window: 
   // OffsetX = max(0.5f * (Buffer->Width - ScaledWidth), 0)
   int32 OffsetX = Buffer->Width > ScaledWidth ?
     (Buffer->Width - ScaledWidth) / 2 : 0;
   int32 OffsetY = Buffer->Height > ScaledHeight ?
     (Buffer->Height - ScaledHeight) / 2 : 0;
 
-   
-  char DebugBuffer[256];
-  sprintf(DebugBuffer, "XOffset: %d, YOffset: %d, Buffer Width: %d, Buffer Height: %d\n", OffsetX, OffsetY, Buffer->Width, Buffer->Height);
-  OutputDebugStringA(DebugBuffer);
-
-  
   uint32 ScaledX, ScaledY;
   uint8 *Row = (uint8*)Buffer->Memory;
   for(int Y = 0;
@@ -509,8 +339,8 @@ internal void SimulationRender(win32_offscreen_buffer *Buffer)
 	{
 	  if(Y < OffsetY || Y >= OffsetY + ScaledHeight || X < OffsetX || X >= OffsetX + ScaledWidth)
 	    {
-	      // (Render white)
-	      *Pixel++ = ((255 << 16) | (255 << 8) | 255);
+	      // (Render black)
+	      *Pixel++ = 0;
 	    }
 	  else
 	    {
@@ -521,12 +351,11 @@ internal void SimulationRender(win32_offscreen_buffer *Buffer)
 	      real32 PixelDensity = SimulationGrid.Density[IX(ScaledX + 1, ScaledY + 1)];
 	      // (Max against 255)
 	      uint8 Blue = (PixelDensity > 255) ? 255 : (uint8)PixelDensity;
-	      // *Pixel++ = ((Green << 8) | Blue); // (pixel bytes are (blank)RGB, 4 bytes)
+	      // *Pixel++ = ((Green << 8) | Blue);
 	      // (Greyscale)
 	      *Pixel++ = ((Blue << 16) | (Blue << 8) | Blue);
 	    }
 	  
-
 	}
 
       Row += Buffer->Pitch;
@@ -665,39 +494,13 @@ LRESULT Win64MainWindowCallback(
     bool WasDown = ((LParam & (1 << 30)) != 0);
     bool IsDown = ((LParam & (1 << 31)) == 0); 
     switch(VK_Code){
-    case 'W': { OutputDebugStringA("W\n");
-    } break;
-    case 'A': {
-    } break;
-    case 'S': {
-    } break;
-    case 'D': {
-    } break;
-    case 'Q': {
-    } break;
-    case 'E': {
-    } break;
-    case VK_UP: {
-    } break;
-    case VK_LEFT: {
-    } break;
-    case VK_DOWN: {
-    } break;
-    case VK_RIGHT: {
-    } break;
     case VK_ESCAPE: {
-      OutputDebugStringA("Escape: ");
-      if(WasDown){OutputDebugStringA("WasDown");}
-      if(IsDown){OutputDebugStringA("IsDown ");}
-      OutputDebugStringA("\n");
-    } break;
-    case VK_SPACE: {
+      GlobalRunning = false;
     } break;
     case VK_F4: {
       if ((LParam & (1 << 29)) != 0){ GlobalRunning = false; }
     } break;
     case VK_F11: {
-
       if(IsDown && !WasDown){
       
       DWORD dwStyle = GetWindowLong(Window, GWL_STYLE);
@@ -726,13 +529,10 @@ LRESULT Win64MainWindowCallback(
 	SetWindowPlacement(Window, &g_wpPrev);
 	SetWindowPos(Window, NULL, 0, 0, 0, 0,
 		     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER  | SWP_FRAMECHANGED);
-      }
-      // OutputDebugStringA("foo");
-    } 
+      }} 
     } break;
     }
   } break;
-
   case WM_PAINT:
   {
     PAINTSTRUCT Paint;
@@ -741,11 +541,12 @@ LRESULT Win64MainWindowCallback(
     win32_window_dimension Dimension = GetWindowDimension(Window);
     Win64DisplayBufferInWindow(DeviceContext, Dimension.Width, Dimension.Height, &GlobalBackBuffer);
 
-    EndPaint(Window, &Paint); // (returns bool)
+    EndPaint(Window, &Paint);
  
   } break;
   case WM_NCLBUTTONDBLCLK:
   {
+    // TODO: fullscreen to device resolution without removing WS_OVERLAPPEDWINDOW
     SendMessage(Window, WM_KEYDOWN, VK_F11, 0);
   } break;
   case WM_MOUSEMOVE:
@@ -758,15 +559,6 @@ LRESULT Win64MainWindowCallback(
     GlobalMouse.X = GET_X_LPARAM(LParam);
     GlobalMouse.Y = GET_Y_LPARAM(LParam);
 
-    /* 
-    char MouseBuffer[256];
-    sprintf(MouseBuffer, "Mouse: Current(X=%d, Y=%d) Prior(X=%d, Y=%d) Button:%s\n", 
-            GlobalMouseX, GlobalMouseY, 
-            PriorMouseX, PriorMouseY,
-            GlobalMouseDown ? "DOWN" : "UP");
-    OutputDebugStringA(MouseBuffer);
-    */
-    
   } break;
 
   default:
@@ -787,10 +579,6 @@ int WINAPI WinMain(HINSTANCE Instance,
 		   PSTR CommandLine,
 		   int ShowCode)
 {
-  // MessageBox(0, "This is Handmade Hero.", "Handmade Hero", MB_OK|MB_ICONINFORMATION)
-
-  Win32LoadXInput();
-  
   WNDCLASSA WindowClass = {};
 
   Win64ResizeDIBSection(&GlobalBackBuffer, 1280, 720);
@@ -800,8 +588,7 @@ int WINAPI WinMain(HINSTANCE Instance,
   WindowClass.style = CS_HREDRAW|CS_VREDRAW;
   WindowClass.lpfnWndProc = Win64MainWindowCallback;
   WindowClass.hInstance = Instance; 
-  // HICON hIcon; 
-  WindowClass.lpszClassName = "HandmadeHeroWindowClass"; 
+  WindowClass.lpszClassName = "SimulationWindow"; 
 
   LARGE_INTEGER PerfCountFrequencyResult;
   QueryPerformanceFrequency(&PerfCountFrequencyResult);
@@ -825,37 +612,19 @@ int WINAPI WinMain(HINSTANCE Instance,
 				    0);
       if(Window)
 	{
-	  // (Graphics vars)
-	  GlobalXOffset = 0;
-	  GlobalYOffset = 0;
-
 	  GlobalRunning = true;
 
 	  HDC DeviceContext = GetDC(Window);
 
-	  // Win64InitWASAPI(Window);
-
-	  // Sound vars
-	  /* 
-	  HRESULT hr;
-	  real32 frequencyHz = 261;
-	  real32 phase = 0.0;
-	  real32 phaseDelta = (2.0 * 3.14159265358979323846 * frequencyHz) / sampleRateGlobal;
-	  real32 volume = 1;
-	  real32 sample;
-	  */
-	  
-	  // LARGE_INTEGER BeginCounter;
-	  // QueryPerformanceCounter(&BeginCounter);
-
+	  /* Performance tracking: 
 	  LARGE_INTEGER LastCounter;
 	  QueryPerformanceCounter(&LastCounter);
 	  int64 LastCycleCount =  __rdtsc();	  
+	  */
 	  
 	  while(GlobalRunning){
 	 
 	    MSG Message;
-	    // win32_offscreen_buffer Buffer;
 	    while(PeekMessageA(&Message, 0, 0, 0, PM_REMOVE))
 	      {
 		if(Message.message == WM_QUIT)
@@ -867,20 +636,21 @@ int WINAPI WinMain(HINSTANCE Instance,
 		DispatchMessage(&Message); 
 	      }
 
-	    // Render Visual Buffer
+	    // Run and draw simulation
 	    SimulationDriver();
-	    SimulationRender(&GlobalBackBuffer);
+	    DisplaySimulation(&GlobalBackBuffer);
 
+	    // Update window dimensions
 	    win32_window_dimension Dimension = GetWindowDimension(Window);
 	    Win64DisplayBufferInWindow(DeviceContext, Dimension.Width, Dimension.Height, &GlobalBackBuffer);
 
 	    HandleMouseInput(Dimension);
 	    
-	    // Time Tracking (QueryPerformanceCounter, rdtsc): 
+	    /* Performance tracking: 
 	    int64 EndCycleCount = __rdtsc();
 	    LARGE_INTEGER EndCounter;
 	    QueryPerformanceCounter(&EndCounter);	    
-	    
+
 	    int64 CyclesElapsed = EndCycleCount - LastCycleCount;
 	    int64 CounterElapsed = EndCounter.QuadPart - LastCounter.QuadPart;
 	    LastCounter = EndCounter;
@@ -890,29 +660,14 @@ int WINAPI WinMain(HINSTANCE Instance,
 	    real32 FPS = (real32)PerfCountFrequency / (real32)CounterElapsed;
 	    real32 MCPF = (real32)CyclesElapsed / (1000.0f * 1000.0f);
 
-	    /* 
 	    char Buffer[256];
 	    sprintf(Buffer, "ms / frame: %.02fms --- FPS: %.02ffps --- m-cycles / frame: %.02f\n", MSPerFrame, FPS, MCPF);
 	    OutputDebugStringA(Buffer);
 	    */
 	    
-	    // GlobalXOffset += 1;
-	    // GlobalYOffset -= 1;
-	    
 	    // (end of while(GlobalRunning loop)
 	  }
-
-       
-       
 	}
-      else{
-	// TODO: CreateWindowExA error handling
-      }
     }
-  else{
-    // TODO: RegisterClassA error handling
-  }
-  
-  
   return(0);
 }
