@@ -758,15 +758,6 @@ LRESULT Win64MainWindowCallback(
     GlobalMouse.X = GET_X_LPARAM(LParam);
     GlobalMouse.Y = GET_Y_LPARAM(LParam);
 
-    /* 
-    char MouseBuffer[256];
-    sprintf(MouseBuffer, "Mouse: Current(X=%d, Y=%d) Prior(X=%d, Y=%d) Button:%s\n", 
-            GlobalMouseX, GlobalMouseY, 
-            PriorMouseX, PriorMouseY,
-            GlobalMouseDown ? "DOWN" : "UP");
-    OutputDebugStringA(MouseBuffer);
-    */
-    
   } break;
 
   default:
