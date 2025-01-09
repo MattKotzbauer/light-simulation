@@ -8,7 +8,7 @@ Often in games, we treat light as having infinite speed, displaying the end resu
 ![Image from Simulation](src/misc/Example1.png)
 
 
-I referred to [Stam's classic paper](http://graphics.cs.cmu.edu/nsp/course/15-464/Fall09/papers/StamFluidforGames.pdf) on Navier-Stokes fluid simulations for the math, and have (in general) used a lot of code and inspiration from Muratori's [Handmade Hero](https://hero.handmade.network/) series for things like project organization and performance, down to some finer details like window management and drawing pixels onscreen. Relatedly, I built this from scratch in C++ (the better the performance, the more pixels we can afford to display). I call the [.NET API](https://learn.microsoft.com/en-us/docs/) directly for things like windowing, input, and drawing onscreen, and specify the libraries that I use in a batch file rather than using any external make utilities.
+I referred to [Stam's classic paper](http://graphics.cs.cmu.edu/nsp/course/15-464/Fall09/papers/StamFluidforGames.pdf) on Navier-Stokes fluid simulations for the math, and have used code and inspiration from Muratori's [Handmade Hero](https://hero.handmade.network/) series for things like project organization and performance, down to some finer details like window management and drawing pixels onscreen. Relatedly, I built this from scratch in C++ (the better the performance, the more pixels we can afford to display). I call the [.NET API](https://learn.microsoft.com/en-us/docs/) directly for things like windowing, input, and drawing onscreen, and specify the libraries that I use in a batch file rather than using any external make utilities.
 
 
 This is a program for Windows, and can be run by cloning this repo and running `build/driver.exe`. 
